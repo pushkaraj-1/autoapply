@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "Job Autofill",
+  "version": "0.21.2",
+  "description": "Fills job applications from your profile using the local jobautomate server.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Job Autofill"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://job-boards.greenhouse.io/*",
+        "https://boards.greenhouse.io/*",
+        "https://jobs.ashbyhq.com/*",
+        "https://jobs.lever.co/*",
+        "https://ats.rippling.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.myworkday.com/*",
+        "https://jobs.gusto.com/*",
+        "https://wellfound.com/*",
+        "https://*.icims.com/*",
+        "https://*.oraclecloud.com/*",
+        "https://*.successfactors.com/*",
+        "https://*.successfactors.eu/*",
+        "https://*.sapsf.com/*",
+        "https://*.sapsf.eu/*",
+        "https://jobs.smartrecruiters.com/*",
+        "https://careers.smartrecruiters.com/*",
+        "https://www.smartr.me/*"
+      ],
+      "js": [
+        "common.js",
+        "greenhouse.js",
+        "ashby.js",
+        "lever.js",
+        "rippling.js",
+        "workday.js",
+        "ats.js",
+        "generic.js",
+        "smartrecruiters.js",
+        "content.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

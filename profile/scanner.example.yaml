@@ -1,0 +1,406 @@
+# Job scanner settings, copied from the email-outreach project (sources.yml +
+# the scoring lists from config/profile.yml). Used by the Find jobs page.
+# You can edit this file by hand or from the page's Scan settings panel.
+#
+# Sources
+#
+# This scanner complements scan.mjs (which hits company ATS APIs directly).
+# It pulls from job-search AGGREGATORS + JobSpy, applies the title/location
+# filters below, dedupes against scan-history.tsv + pipeline.md, and appends
+# new offers to the same pipeline.
+#
+# HOW TO CUSTOMIZE:
+#   1. Copy this file to  sources.yml  in the project root (user layer — gitignored).
+#   2. Edit search_terms + title_filter for YOUR target roles.
+#   3. Toggle sources on/off with sources.<name>.enabled.
+#   4. adzuna + jobspy need setup (API key / Python) — see notes below.
+
+# ── Search terms ────────────────────────────────────────────────────
+# Sent as the query to keyword-driven sources (hiring.cafe, Adzuna, JobSpy).
+# Simplify/RemoteOK/Remotive ignore these (they return a full feed that the
+# title_filter below narrows). Keep JobSpy term lists modest — each term is a
+# separate scrape per board and boards rate-limit.
+# ── Recency ─────────────────────────────────────────────────────────
+# Drop postings older than this many days (by real posting date, not scan date).
+# Set 1 for past-24h, 3 for past-72h, 0 to disable. Override per run: --max-age 1
+max_age_days: 3
+
+search_terms:
+  # -- Software (new grad / junior / intern / co-op) --
+- software engineer
+- software engineer new grad
+- new grad software engineer
+- junior software engineer
+- entry level software engineer
+- software engineer co-op
+- fall software engineering intern
+- remote software engineer intern
+- full stack engineer new grad
+- backend engineer new grad
+- AI engineer new grad
+- new grad AI engineer
+- applied AI engineer
+- AI/ML engineer
+- junior machine learning engineer
+- machine learning engineer new grad
+- machine learning
+- generative AI
+- generative AI engineer
+- LLM engineer
+- AI engineer
+- forward deployed engineer
+- solutions engineer
+title_filter:
+  positive:
+    # -- Software / general engineering --
+  - Software Engineer
+  - Software Developer
+  - Artificial Intelligence
+  - SWE
+  - Engineer
+  - Developer
+  - Programmer
+  - Full Stack
+  - Full-Stack
+  - Backend
+  - Frontend
+  - AI
+  - ML
+  - Artificial Intelligence
+  - Machine Learning
+  - LLM
+  - GenAI
+  - Generative AI
+  - Applied AI
+  - NLP
+  - Agent
+  - Agentic
+  - Data Engineer
+  - Data Scientist
+  - Forward Deployed
+  - Deployed Engineer
+  - Solutions Engineer
+  - Robotics Engineer
+  negative:
+    # Advanced-degree roles — drop anything requiring/mentioning a PhD.
+  - PhD
+  - Ph.D
+  - PhD Intern
+  - Doctorate
+  - Doctoral
+  - Senior
+  - Sr.
+  - Staff
+  - Principal
+  - Distinguished
+  - Director
+  - Head of
+  - VP
+  - Vice President
+  - Manager
+  - Lead
+  - Hardware
+  - Data Entry
+  - Service Desk
+  - Help Desk
+  - Sales
+  - Recruiter
+  - Account Executive
+  - Customer Success
+  - Test
+location_filter:
+  us_only: true
+  allow_empty: true
+  allow_remote: true
+
+# ── Sources ─────────────────────────────────────────────────────────
+sources:
+
+  # Curated GitHub new-grad / internship feeds (raw listings.json, daily,
+  # no auth, no blocking). Best signal for intern/co-op/new-grad.
+  simplify:
+    enabled: true
+    repos:
+    - "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"
+    - "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json"
+
+  # SpeedyApply — GitHub list of USA new grad SWE jobs (Markdown table, links go
+  # straight to each company's application).
+  speedyapply:
+    enabled: true
+    lists:
+    - "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/main/NEW_GRAD_USA.md"
+
+  # Jobright — GitHub list of new grad SWE jobs (Markdown table). Links open on
+  # jobright.ai, where its Apply button leads to the company's application.
+  jobright:
+    enabled: true
+    lists:
+    - "https://raw.githubusercontent.com/jobright-ai/2026-Software-Engineer-New-Grad/master/README.md"
+
+  # hiring.cafe — Next.js SSR search, US-geocoded. Huge ATS aggregate.
+  # Unofficial endpoint: keep volume modest, may break if the site changes.
+  hiringcafe:
+    enabled: true
+    date_fetched_past_n_days: 7   # fetch window; real posting date is filtered by max_age_days
+    us_only: true       # false = drop the US geocode filter (global results)
+    delay_ms: 800       # pause between per-term requests
+
+  # LinkedIn — unauthenticated guest search endpoint. Daily-new via f_TPR,
+  # newest-first (sortBy=DD). Unofficial (against LinkedIn ToS) and rate-limits
+  # after many rapid requests — keep pages low; add a proxy only if you scale up.
+  linkedin:
+    enabled: true
+    time_posted: "r259200"  # r86400=24h, r259200=72h, r604800=week, r2592000=month
+    geo_id: "103644278"     # United States
+    location: "United States"
+    experience: "1,2,3"     # 1=internship, 2=entry, 3=associate (new-grad/junior)
+    # workplace_type: "2"   # 1=onsite, 2=remote, 3=hybrid (omit = any)
+    # job_type: "I,F"       # I=internship, F=full-time, C=contract (omit = any)
+    pages: 1                # 10 results/page/term; raise cautiously (rate limits)
+    delay_ms: 1500          # pause between requests
+
+  # RemoteOK — /api JSON. Remote roles. Attribution required (we keep source URLs).
+  remoteok:
+    enabled: true
+
+  # Remotive — /api/remote-jobs JSON. Remote roles, 24h delayed. Rate-limited
+  # (>2 req/min blocks) so keep categories few and delay_ms high.
+  remotive:
+    enabled: true
+    categories: ["software-dev", "data"]
+    delay_ms: 2500
+
+  # Greenhouse — boards-api.greenhouse.io. Keyless, one board per company.
+  # Add companies you care about as board tokens (from their careers URL:
+  # job-boards.greenhouse.io/<TOKEN>). String or { token, company }.
+  greenhouse:
+    enabled: true
+    delay_ms: 250
+    boards:
+    - {token: anthropic, company: Anthropic}
+    - {token: scaleai, company: "Scale AI"}
+    - {token: fireworksai, company: "Fireworks AI"}
+    - {token: databricks, company: Databricks}
+    - {token: stripe, company: Stripe}
+    - {token: figma, company: Figma}
+    - {token: coinbase, company: Coinbase}
+    - {token: robinhood, company: Robinhood}
+    - {token: brex, company: Brex}
+    - {token: affirm, company: Affirm}
+    - {token: airtable, company: Airtable}
+    - {token: gusto, company: Gusto}
+    - {token: discord, company: Discord}
+    - {token: dropbox, company: Dropbox}
+    - {token: airbnb, company: Airbnb}
+    - {token: pinterest, company: Pinterest}
+    - {token: reddit, company: Reddit}
+    - {token: instacart, company: Instacart}
+    - {token: lyft, company: Lyft}
+    - {token: twitch, company: Twitch}
+    - {token: cloudflare, company: Cloudflare}
+    - {token: gitlab, company: GitLab}
+    - {token: datadog, company: Datadog}
+    - {token: mongodb, company: MongoDB}
+    - {token: elastic, company: Elastic}
+    - {token: twilio, company: Twilio}
+    - {token: asana, company: Asana}
+    - {token: samsara, company: Samsara}
+    - {token: verkada, company: Verkada}
+    - {token: chime, company: Chime}
+    - {token: faire, company: Faire}
+    - {token: lattice, company: Lattice}
+      # Cap-exempt H-1B employers (nonprofit research; no lottery)
+    - {token: thealleninstitute, company: "Allen Institute for AI (Ai2)"}
+
+  # Lever — api.lever.co. Keyless, one board per company. Token from the
+  # careers URL: jobs.lever.co/<TOKEN>.
+  lever:
+    enabled: true
+    delay_ms: 250
+    boards:
+    - {token: palantir, company: Palantir}
+    - {token: spotify, company: Spotify}
+    - {token: veeva, company: Veeva}
+
+  # Ashby — api.ashbyhq.com. Keyless, one board per company. Token from the
+  # careers URL: jobs.ashbyhq.com/<TOKEN>.
+  ashby:
+    enabled: true
+    delay_ms: 250
+    boards:
+    - {token: openai, company: OpenAI}
+    - {token: ramp, company: Ramp}
+    - {token: notion, company: Notion}
+    - {token: cohere, company: Cohere}
+    - {token: harvey, company: Harvey}
+    - {token: sierra, company: Sierra}
+    - {token: linear, company: Linear}
+    - {token: elevenlabs, company: ElevenLabs}
+    - {token: writer, company: Writer}
+    - {token: baseten, company: Baseten}
+    - {token: mercor, company: Mercor}
+    - {token: decagon, company: Decagon}
+    - {token: watershed, company: Watershed}
+    - {token: suno, company: Suno}
+    - {token: runway, company: Runway}
+
+  # SmartRecruiters — api.smartrecruiters.com. Keyless, one company each, US
+  # postings only. Token from the careers URL: jobs.smartrecruiters.com/<TOKEN>.
+  smartrecruiters:
+    enabled: true
+    max_pages: 5  # 100 postings a page
+    boards:
+    - {token: LinkedIn3, company: LinkedIn}
+    - {token: ServiceNow, company: ServiceNow}
+    - {token: Intuitive, company: Intuitive Surgical}
+    - {token: WesternDigital, company: Western Digital}
+    - {token: BoschGroup, company: Bosch}
+    - {token: Experian, company: Experian}
+
+  # The Muse — themuse.com public jobs API. Keyless (set THEMUSE_API_KEY in
+  # .env only to raise the rate limit). Category + location filtered.
+  themuse:
+    enabled: true
+    categories: ["Software Engineering", "Data Science", "Data and Analytics"]
+    locations: ["United States", "Flexible / Remote"]
+    max_pages: 2
+    delay_ms: 800
+
+  # Google Jobs — the "Brian's Job Search" method. Google's official Programmable
+  # Search (Custom Search JSON API), locked to trusted ATS domains below → every
+  # hit is a DIRECT first-party apply link across UNLIMITED companies (not a fixed
+  # board list). This is how you get authentic breadth beyond the greenhouse/lever/
+  # ashby token lists above.
+  # SETUP (free): 1) create a Programmable Search Engine at
+  #   https://programmablesearchengine.google.com  → set it to "Search the entire web".
+  #   2) get a Custom Search API key at https://developers.google.com/custom-search/v1/overview
+  #   3) put BOTH in .env:  GOOGLE_CSE_KEY=...   GOOGLE_CSE_CX=<engine id>
+  # Free tier = 100 queries/day (each search term = 1 query).
+  googlejobs:
+    enabled: true
+    date_restrict: "d7"     # only pages Google indexed in the last N days (d1/d7/w2/m1…)
+    pages_per_term: 1       # 10 results/page/term
+    max_queries: 90         # hard stop under the 100/day free quota
+    # Engine is restricted to the ATS domains in the Programmable Search console
+    # (*.greenhouse.io, *.lever.co, *.ashbyhq.com, *.smartrecruiters.com,
+    # *.myworkdayjobs.com), so we send bare queries — no site: chain needed.
+    # If you instead use a "search the entire web" engine, list the domains here.
+    sites: []
+
+  # Adzuna — official aggregator REST API with salary data.
+  # SETUP: register free at https://developer.adzuna.com → put BOTH values in .env:
+  #   ADZUNA_APP_ID=...        (the 8-char Application ID)
+  #   ADZUNA_APP_KEY=...       (or ADZUNA_API_KEY — the 32-char key)
+  adzuna:
+    enabled: true
+    country: "us"
+    max_pages: 1
+    results_per_page: 50
+
+  # JobSpy — scrapes Indeed / Google / LinkedIn / ZipRecruiter via python-jobspy.
+  # ENABLED: installed into .venv (Python 3.11) via `pip install -U python-jobspy`.
+  # LinkedIn rate-limits hard (~10 pages/IP) WITHOUT a proxy. Set PROXY_URL (or
+  # JOBSPY_PROXIES=a,b,c) in .env, or list proxies below — then "linkedin" is
+  # added to the sites automatically (linkedin_via_proxy: false to opt out).
+    max_days_old: 7
+  jobspy:
+    enabled: true
+    sites:
+    - "indeed"
+    - "zip_recruiter"
+    results_per_site: 30
+    hours_old: 72         # match the 72h recency window
+    remote: false
+    location: "United States"
+    country_indeed: "USA"
+    proxies: []           # e.g. ["user:pass@gate.provider.com:7000"] — rotates per request
+    linkedin_via_proxy: true
+
+# ── Fit score ───────────────────────────────────────────────────────
+# Quick score from the job title alone (0-100): +45 for a strong role, +8 per
+# core skill (up to +32), +15 for a target level, -40 for an off-target word,
+# starting from 20. Jobs scoring 70+ also get an AI fit check against your resume.
+scoring:
+  strong_roles:        # title matches one → strong role fit
+  - "AI Engineer"
+  - "Machine Learning Engineer"
+  - "ML Engineer"
+  - "Applied AI"
+  - "Applied Scientist"
+  - "Software Engineer"
+  - "Software Developer"
+  - "Full Stack"
+  - "Full-Stack"
+  - "Backend"
+  - "Forward Deployed"
+  - "Research Engineer"
+  - "Research Scientist"
+  - "Data Engineer"
+  - "Data Scientist"
+  core_skills:         # your resume strengths — each hit in the title adds points
+  - "AI"
+  - "ML"
+  - "Machine Learning"
+  - "LLM"
+  - "GenAI"
+  - "Generative AI"
+  - "NLP"
+  - "Agent"
+  - "Agentic"
+  - "RAG"
+  - "Deep Learning"
+  - "Computer Vision"
+  - "Recommendation"
+  - "Python"
+  - "React"
+  - "Node"
+  - "Data"
+  - "Platform"
+  - "Infrastructure"
+  boost_levels:        # the levels you're targeting
+  - "Intern"
+  - "Internship"
+  - "New Grad"
+  - "New Graduate"
+  - "Co-op"
+  - "Co op"
+  - "Coop"
+  - "Junior"
+  - "Entry Level"
+  - "Entry-Level"
+  - "Associate"
+  - "University Grad"
+  - "Early Career"
+  off_target:          # mismatched with your CS/AI profile — subtract points
+  - "Firmware"
+  - "Hardware"
+  - "ASIC"
+  - "FPGA"
+  - "Embedded"
+  - "Mechanical"
+  - "Electrical"
+  - "Analog"
+  - "RF"
+  - "Verification"
+  - "Physical Design"
+  - "Sales"
+  - "Marketing"
+
+# ── AI fit check ────────────────────────────────────────────────────
+# After each scan, new jobs with a fit score at or above min_fit get their full
+# description read and judged against your resume (up to `limit` per scan).
+deep_score:
+  enabled: true
+  min_fit: 0
+  limit: 60
+auto_scan_hours: 0
+auto_apply:
+  submit: false
+  daily_cap: 15
+  min_fit: 0
+  sites:
+  - greenhouse
+  - lever
+  - ashby
+  gap_seconds: 45

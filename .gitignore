@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets (OpenRouter key, Workday email and password)
+.env
+
+# Your own facts, resume notes and writing samples. Only the .example templates are shared.
+profile/*
+!profile/*.example.*
+
+# Everything the tool saves while it runs: applications, answers, cover letters,
+# job lists, screenshots and the browser profile used for sign-ins.
+data/
+
+# Pages saved while building site support
+*.html
+!extension/*.html
+
+.DS_Store

@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --bg: #0f1518;
+        --card: #172025;
+        --line: #24313a;
+        --text: #e9f0f2;
+        --muted: #8a9aa3;
+        --accent: #2ec4b6;
+        --accent-dark: #1a9e92;
+        --warm: #f4b860;
+        --bad: #f07167;
+      }
+      * { box-sizing: border-box; }
+      html { background: var(--bg); }
+      body { width: 320px; margin: 0; padding: 16px; color: var(--text); background: var(--bg); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+      button { font: inherit; }
+
+      header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+      .logo { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: linear-gradient(140deg, var(--accent), #3a86ff); color: #06201d; }
+      .logo svg { width: 20px; height: 20px; }
+      .title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+      .server { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+      .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+      .dot.ok { background: var(--accent); }
+      .dot.bad { background: var(--bad); }
+
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 10px; }
+      .today { display: flex; align-items: center; gap: 14px; }
+      .ring { position: relative; width: 86px; height: 86px; flex: none; }
+      .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+      .ring circle { fill: none; stroke-width: 8; }
+      .ring .track { stroke: var(--line); }
+      .ring .progress { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset 0.8s ease, stroke 0.3s; }
+      .ring .progress.done { stroke: var(--warm); }
+      .ring .count { position: absolute; inset: 0; display: grid; place-items: center; font-size: 30px; font-weight: 750; font-variant-numeric: tabular-nums; }
+      .facts .big { font-size: 15px; font-weight: 650; }
+      .facts .line { color: var(--muted); font-size: 12px; margin-top: 3px; }
+      .goal { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; border-bottom: 1px dashed currentColor; }
+      .goal-input { width: 48px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--accent); border-radius: 5px; padding: 0 4px; }
+
+      .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 74px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+      .day { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; font-size: 10px; color: var(--muted); }
+      .day .bar { width: 100%; max-width: 22px; border-radius: 5px 5px 2px 2px; background: var(--line); min-height: 4px; }
+      .day.has .bar { background: color-mix(in srgb, var(--accent) 70%, transparent); }
+      .day.now { color: var(--text); font-weight: 600; }
+      .day.now .bar { background: var(--accent); }
+
+      .fill { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; margin: 4px 0 10px; border: 0; border-radius: 12px; cursor: pointer; font-size: 14px; font-weight: 650; color: #062421; background: var(--accent); }
+      .fill svg { width: 16px; height: 16px; }
+      .fill:hover { background: #45d3c6; }
+      .fill:disabled { background: var(--line); color: var(--muted); cursor: default; }
+
+      .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+      .action { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 10px; border-radius: 11px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+      .action svg { width: 16px; height: 16px; color: var(--accent); }
+      .action:hover { border-color: var(--accent); }
+      .action:disabled { opacity: 0.45; cursor: default; border-color: var(--line); }
+      .action.wide { width: 100%; margin-bottom: 8px; }
+      .badge { font-size: 11px; font-weight: 700; color: #062421; background: var(--accent); border-radius: 999px; padding: 1px 7px; }
+
+      .setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; user-select: none; }
+      .setting .name { font-weight: 600; }
+      .setting .hint { color: var(--muted); font-size: 11px; margin-top: 2px; }
+      .setting input { display: none; }
+      .switch { flex: none; width: 36px; height: 20px; border-radius: 999px; background: var(--line); position: relative; transition: background 0.2s; }
+      .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform 0.2s, background 0.2s; }
+      .setting input:checked + .switch { background: var(--accent-dark); }
+      .setting input:checked + .switch::after { transform: translateX(16px); background: #fff; }
+
+      #status { margin-top: 10px; white-space: pre-wrap; color: var(--muted); font-size: 12px; max-height: 220px; overflow: auto; }
+      #status:empty { display: none; }
+      code { background: var(--card); padding: 1px 4px; border-radius: 4px; color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /></svg>
+      </div>
+      <div>
+        <div class="title">Job Autofill</div>
+        <div class="server"><span class="dot" id="dot"></span><span id="server">Checking the local server...</span></div>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="today">
+        <div class="ring">
+          <svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="42" /><circle class="progress" id="progress" cx="50" cy="50" r="42" /></svg>
+          <div class="count" id="today">0</div>
+        </div>
+        <div class="facts">
+          <div class="big" id="headline">Applied today</div>
+          <div class="line"><span id="goal-text">of</span> <button class="goal" id="goal" title="Click to change your daily goal">20</button> daily goal</div>
+          <div class="line" id="streak"></div>
+          <div class="line" id="total"></div>
+        </div>
+      </div>
+      <div class="week" id="week"></div>
+    </section>
+
+    <button class="fill" id="fill" disabled>
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>
+      Fill this application
+    </button>
+
+    <button class="action wide" id="find" title="Browse scanned jobs and apply">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.2-4.2" /></svg>
+      Find jobs <span class="badge" id="new-jobs" hidden></span>
+    </button>
+
+    <div class="actions">
+      <button class="action" id="dashboard" title="Open your statistics">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 20V4" /><path d="M4 20h16" /><path d="M9 16v-5" /><path d="M13.5 16V8" /><path d="M18 16v-3" /></svg>
+        Dashboard
+      </button>
+      <button class="action" id="applied" title="Save the job on this tab as applied" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+        Mark applied
+      </button>
+    </div>
+
+    <label class="card setting">
+      <div>
+        <div class="name">Fill forms on open</div>
+        <div class="hint">Application forms fill by themselves. You still press Submit.</div>
+      </div>
+      <input type="checkbox" id="auto" />
+      <span class="switch"></span>
+    </label>
+
+    <div id="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

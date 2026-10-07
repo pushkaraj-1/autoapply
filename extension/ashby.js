@@ -1,0 +1,131 @@
+// Ashby forms: every field sits in a box with data-field-path set to the field's path.
+// Yes/No questions are two buttons, single choices are radio buttons, and
+// location is a search box with suggestions.
+
+function fieldBox(id) {
+  return document.querySelector(`[data-field-path="${id}"]`);
+}
+
+function choiceInputs(box, type) {
+  return [...box.querySelectorAll(`input[type=${type}]`)].map((input) => ({
+    input,
+    label: box.querySelector(`label[for="${input.id}"]`) || input.closest("label") || input.parentElement,
+  }));
+}
+
+function pickChoice(box, type, wanted) {
+  const choices = choiceInputs(box, type);
+  const choice = matchText(choices, wanted, (c) => c.label.innerText);
+  if (!choice) throw new Error(`no option "${wanted}" (saw: ${choices.map((c) => clean(c.label.innerText)).join(" / ") || "nothing"})`);
+  if (!choice.input.checked) choice.input.click();
+}
+
+// "Start typing..." boxes (location, and single choices with long lists): type the
+// way a keyboard does, wait for the suggestions, and click the one find() picks.
+async function ashbyCombobox(box, text, find, what) {
+  const input = box.querySelector("input[role=combobox]") || box.querySelector("input");
+  const options = () => {
+    const listbox = input.getAttribute("aria-controls") && document.getElementById(input.getAttribute("aria-controls"));
+    return [...(listbox || document).querySelectorAll("[role=option]")].filter((o) => o.offsetParent !== null);
+  };
+  input.focus();
+  input.select();
+  if (!document.execCommand("insertText", false, text) || input.value !== text) setNativeValue(input, text);
+  let option = await waitFor(() => find(options()), 8000);
+  if (!option) {
+    // Some lists only open on a click or Down Arrow.
+    realClick(input);
+    input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown", code: "ArrowDown", keyCode: 40 }));
+    option = await waitFor(() => find(options()), 3000);
+  }
+  if (!option) {
+    const seen = options().slice(0, 6).map((o) => clean(o.innerText));
+    throw new Error(`no ${what} (saw: ${seen.join(" / ") || "nothing"})`);
+  }
+  realClick(option);
+  await sleep(200);
+}
+
+async function chooseAshbyLocation(box, place) {
+  const [city, ...rest] = place.split(",").map((s) => s.trim());
+  const state = (rest[rest.length - 1] || "").toLowerCase();
+  const states = { ca: "california", ny: "new york", wa: "washington", tx: "texas", ma: "massachusetts" };
+  const text = (o) => clean(o.innerText).toLowerCase();
+  await ashbyCombobox(
+    box,
+    city,
+    (options) =>
+      options.find((o) => text(o).startsWith(city.toLowerCase()) && (text(o).includes(`, ${state}`) || (states[state] && text(o).includes(states[state])))) ||
+      options.find((o) => text(o).startsWith(city.toLowerCase())) ||
+      null,
+    `"${place}" in the suggestions`,
+  );
+}
+
+async function chooseAshbyOption(box, value) {
+  await ashbyCombobox(box, String(value), (options) => matchText(options, String(value)) || null, `option "${value}"`);
+}
+
+const ashbySite = {
+  matches: () => location.hostname === "jobs.ashbyhq.com" && Boolean(document.querySelector("[data-field-path]")),
+
+  async fill(field, value, ctx) {
+    const box = fieldBox(field.id);
+    if (!box) throw new Error("field not found on the page");
+    if (field.kind === "file") {
+      await attachFile(box.querySelector("input[type=file]"), fileFor(value, ctx), box);
+    } else if (field.kind === "text") {
+      fillText(box.querySelector("textarea, input:not([type=file]):not([type=checkbox]):not([type=radio])"), value);
+    } else if (field.kind === "boolean") {
+      const button = box.querySelector(`button[data-option="${value.toLowerCase()}"]`);
+      if (!button) throw new Error(`no "${value}" button`);
+      if (button.getAttribute("aria-pressed") !== "true") realClick(button);
+    } else if (field.kind === "radio" && !box.querySelector("input[type=radio]") && box.querySelector("input[role=combobox]")) {
+      await chooseAshbyOption(box, value); // long lists are a search box instead of radio buttons
+    } else if (field.kind === "radio") {
+      pickChoice(box, "radio", value);
+    } else if (field.kind === "checkboxes") {
+      for (const item of value) pickChoice(box, "checkbox", item);
+    } else if (field.kind === "location") {
+      await chooseAshbyLocation(box, value);
+    } else {
+      throw new Error(`don't know how to fill a "${field.kind}" field`);
+    }
+  },
+
+  check(field, value, ctx) {
+    const box = fieldBox(field.id);
+    if (!box) return "field not found on the page";
+    if (field.kind === "file") return box.innerText.includes(fileFor(value, ctx).name) ? null : "file did not attach";
+    if (field.kind === "text") {
+      const shown = box.querySelector("textarea, input:not([type=file]):not([type=checkbox]):not([type=radio])").value;
+      return clean(shown) === clean(value) ? null : `page shows "${shown}"`;
+    }
+    if (field.kind === "boolean") {
+      const button = box.querySelector(`button[data-option="${value.toLowerCase()}"]`);
+      return button && button.getAttribute("aria-pressed") === "true" ? null : `"${value}" is not selected`;
+    }
+    if (field.kind === "radio" && !box.querySelector("input[type=radio]") && box.querySelector("input[role=combobox]")) {
+      const shown = clean(box.querySelector("input[role=combobox]").value || box.innerText);
+      return shown.toLowerCase().includes(String(value).toLowerCase()) ? null : `page shows "${shown.slice(0, 60)}"`;
+    }
+    if (field.kind === "radio" || field.kind === "checkboxes") {
+      const type = field.kind === "radio" ? "radio" : "checkbox";
+      const checked = choiceInputs(box, type).filter((c) => c.input.checked).map((c) => clean(c.label.innerText));
+      const wanted = Array.isArray(value) ? value : [value];
+      const missing = wanted.filter((w) => !checked.some((c) => c.toLowerCase().startsWith(w.toLowerCase())));
+      return missing.length ? `not selected: ${missing.join(", ")}` : null;
+    }
+    if (field.kind === "location") {
+      const shown = box.querySelector("input").value;
+      return shown.includes(value.split(",")[0]) ? null : `page shows "${shown}"`;
+    }
+    return null;
+  },
+};
+
+// On an Ashby job page the form lives under /application.
+function ashbyApplicationUrl() {
+  const match = location.pathname.match(/^\/([^/]+)\/([0-9a-f-]{36})\/?$/);
+  return location.hostname === "jobs.ashbyhq.com" && match ? `${location.origin}/${match[1]}/${match[2]}/application` : null;
+}

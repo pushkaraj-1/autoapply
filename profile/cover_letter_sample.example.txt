@@ -1,0 +1,9 @@
+Dear Hiring Team,
+I'm finishing my MS in Computer Science at Example University in December, and I'm applying for the Software Engineer role at Example Corp. What draws me to this team is the work on reliable data systems.
+This summer I was a Software Engineer Intern at Example Company, where I built an API that served 1,000 requests a second and cut response time from 2 seconds to 300 milliseconds.
+At Example University I built a data pipeline that cleaned and loaded 5 million records a day, with checks that caught bad data before it reached reports.
+I have also built a search feature for a class project, which taught me to measure what users actually find useful.
+What draws me to Example Corp is the chance to build systems that many people rely on every day, and I would bring careful engineering and a focus on measurable results.
+I've attached my resume. Thank you for your time.
+Best,
+Alex Doe

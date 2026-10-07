@@ -1,0 +1,7 @@
+I build software end to end, from the data that feeds it to the services that run in production.
+
+Backend: At Example Company, I built an API that served 1,000 requests a second and cut response time from 2 seconds to 300 milliseconds with caching and better indexing.
+
+Data pipelines: At Example University, I built a pipeline that cleaned and loaded 5 million records a day, with automated checks that caught bad data before it reached reports.
+
+Cloud: I deploy services with Docker and CI/CD, and I focus on systems that are reliable, observable and easy to scale.

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Job Search Dashboard</title>
+    <style>
+      :root {
+        --bg: #f7f8fa;
+        --card: #ffffff;
+        --text: #1b1f24;
+        --muted: #6b7380;
+        --line: #e4e7ec;
+        --soft: #f1f3f6;
+        --accent: #0f9d8f;
+        --bar: #5cc3b8;
+        --applied: #7a8699;
+        --heard_back: #d4930f;
+        --interview: #7c3aed;
+        --offer: #16a34a;
+        --rejected: #dc2626;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f1216;
+          --card: #171b21;
+          --text: #e8ebef;
+          --muted: #8d96a3;
+          --line: #262c35;
+          --soft: #1e232b;
+          --accent: #2ec4b6;
+          --bar: #2a9d92;
+          --applied: #8d98aa;
+        }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+      main { max-width: 1180px; margin: 0 auto; padding: 28px 20px 60px; }
+      header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+      h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; }
+      h2 { font-size: 15px; margin: 0 0 14px; }
+      .muted { color: var(--muted); }
+      .small { font-size: 12px; }
+      button, .button { font: inherit; border-radius: 10px; padding: 8px 14px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:hover { border-color: var(--accent); }
+      .tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+      .tabs a { text-decoration: none; padding: 6px 12px; border-radius: 8px; color: var(--muted); font-weight: 600; }
+      .tabs a.on { background: var(--card); color: var(--text); border: 1px solid var(--line); }
+
+      .overview { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px 16px; margin-bottom: 22px; }
+      .stats { display: grid; grid-template-columns: repeat(4, 1fr); }
+      .stat { padding: 0 20px; border-left: 1px solid var(--line); }
+      .stat:first-child { padding-left: 0; border-left: 0; }
+      .stat .value { font-size: 30px; font-weight: 650; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+      .stat .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .stat.today .value { color: var(--accent); }
+      .outcomes { margin: 16px 0 18px; font-size: 13px; color: var(--muted); }
+      .outcomes b { color: var(--text); font-weight: 600; }
+
+      .chart { position: relative; display: grid; grid-template-columns: 28px 1fr; grid-template-rows: 1fr 22px; height: 190px; }
+      .y-axis { position: relative; }
+      .y-axis span { position: absolute; right: 8px; transform: translateY(50%); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .plot { position: relative; border-bottom: 1px solid var(--line); }
+      .grid-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
+      .bars { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 6px; padding: 0 4px; }
+      .bars .col { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; }
+      .bars .col div { width: 100%; background: var(--bar); border-radius: 3px 3px 0 0; transition: height 0.5s ease, opacity 0.15s; }
+      .bars .col.today div { background: var(--accent); }
+      .bars .col:hover div { opacity: 0.8; }
+      .x-axis { grid-column: 2; display: flex; gap: 6px; padding: 6px 4px 0; }
+      .x-axis span { flex: 1; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: visible; }
+      .tip { position: absolute; pointer-events: none; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); white-space: nowrap; opacity: 0; transition: opacity 0.1s; z-index: 2; }
+      .tip.show { opacity: 1; }
+
+      .toolbar { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+      .toolbar input, .toolbar select { font: inherit; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+      .toolbar input { flex: 1; min-width: 220px; }
+      .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+      .chip { font-size: 12px; padding: 5px 12px; border-radius: 999px; }
+      .chip b { color: var(--muted); font-weight: 600; margin-left: 4px; }
+      .chip.on { background: var(--text); color: var(--card); border-color: var(--text); }
+      .chip.on b { color: inherit; opacity: 0.7; }
+      .list { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 12px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+      td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+      tr:last-child td { border-bottom: 0; }
+      td[contenteditable]:hover { background: var(--soft); border-radius: 6px; }
+      td[contenteditable]:focus { outline: 2px solid var(--accent); border-radius: 6px; }
+      td.role { font-weight: 600; min-width: 200px; }
+      td a { color: var(--accent); text-decoration: none; }
+      select.status { font: inherit; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 4px 10px; border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); cursor: pointer; }
+      .del { border: 0; background: none; color: var(--muted); font-size: 18px; padding: 2px 6px; }
+      .del:hover { color: var(--rejected); }
+      .empty { text-align: center; padding: 40px 10px; color: var(--muted); }
+      .more { display: block; margin: 14px auto 0; }
+      .hint { margin-top: 10px; }
+      .error { background: #fde8e8; color: #9b1c1c; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+      dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); padding: 22px; width: min(440px, calc(100vw - 32px)); }
+      dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+      dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      dialog input { font: inherit; width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+      dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+      .jd-button { font-size: 12px; padding: 4px 10px; border-radius: 999px; }
+      .jd-button.missing { color: var(--muted); border-style: dashed; }
+      .drawer-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 10; }
+      .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); background: var(--card); border-left: 1px solid var(--line); box-shadow: -10px 0 30px rgba(0, 0, 0, 0.15); transform: translateX(100%); transition: transform 0.25s ease; z-index: 11; display: flex; flex-direction: column; }
+      .drawer-open .drawer-back { opacity: 1; pointer-events: auto; }
+      .drawer-open .drawer { transform: none; }
+      .drawer-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--line); }
+      .drawer-head h2 { font-size: 19px; margin: 0 0 4px; letter-spacing: -0.01em; }
+      .drawer-head .meta { color: var(--muted); font-size: 13px; }
+      .drawer-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+      .drawer-tools a, .drawer-tools button { font-size: 13px; padding: 6px 12px; text-decoration: none; }
+      .drawer-body { flex: 1; overflow: auto; padding: 18px 22px 30px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+      .drawer-body textarea { width: 100%; height: 100%; min-height: 360px; font: inherit; line-height: 1.5; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; resize: none; }
+      dialog textarea { width: 100%; height: 110px; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); resize: vertical; }
+      @media (max-width: 700px) {
+        .stats { grid-template-columns: repeat(2, 1fr); row-gap: 16px; }
+        .stat:nth-child(3) { padding-left: 0; border-left: 0; }
+      }
+      @media (max-width: 560px) {
+        main { padding: 20px 16px 40px; }
+        .bars, .x-axis { gap: 2px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav class="tabs"><a href="jobs.html">Find jobs</a><a href="queue.html">Auto apply</a><a href="dashboard.html" class="on">Dashboard</a></nav>
+      <header>
+        <div>
+          <h1>Dashboard</h1>
+          <div class="muted" id="subtitle">Loading...</div>
+        </div>
+        <button id="add">Add application</button>
+      </header>
+
+      <div id="error"></div>
+
+      <section class="overview">
+        <div class="stats" id="stats"></div>
+        <div class="outcomes" id="outcomes"></div>
+        <div class="chart" id="chart">
+          <div class="y-axis" id="y-axis"></div>
+          <div class="plot" id="plot"></div>
+          <div class="x-axis" id="x-axis"></div>
+          <div class="tip" id="tip"></div>
+        </div>
+      </section>
+
+      <div class="toolbar">
+        <input type="search" id="search" placeholder="Search role, company or location" />
+        <select id="date-filter" title="Date applied">
+          <option value="0">Any date</option>
+          <option value="1">Today</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+      </div>
+      <div class="chips" id="filters"></div>
+      <div class="list">
+        <table>
+          <thead>
+            <tr><th>Role</th><th>Company</th><th>Location</th><th>Applied</th><th>Status</th><th>JD</th><th>Letter</th><th></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <button class="more" id="more" hidden>Show more</button>
+      <div class="muted small hint">Click a role, company or location to edit it. Change the status as you hear back.</div>
+    </main>
+
+    <dialog id="dialog">
+      <form method="dialog" id="form">
+        <h2>Add an application</h2>
+        <label for="f-role">Role</label><input id="f-role" required />
+        <label for="f-company">Company</label><input id="f-company" required />
+        <label for="f-location">Location</label><input id="f-location" />
+        <label for="f-url">Job link</label><input id="f-url" type="url" placeholder="https://" />
+        <label for="f-date">Date applied</label><input id="f-date" type="date" required />
+        <label for="f-description">Job description (paste it here so you have it for the interview)</label><textarea id="f-description"></textarea>
+        <div class="actions"><button type="button" id="cancel">Cancel</button><button class="primary" type="submit">Add</button></div>
+      </form>
+    </dialog>
+
+    <div class="drawer-back" id="drawer-back"></div>
+    <aside class="drawer" id="drawer" aria-label="Job description">
+      <div class="drawer-head">
+        <h2 id="d-title"></h2>
+        <div class="meta" id="d-meta"></div>
+        <div class="drawer-tools" id="d-tools"></div>
+      </div>
+      <div class="drawer-body" id="d-body"></div>
+    </aside>
+
+    <script src="dashboard.js"></script>
+  </body>
+</html>

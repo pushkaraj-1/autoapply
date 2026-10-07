@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auto Apply</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --text: #1b1f24;
+        --muted: #646d78;
+        --line: #e3e6ea;
+        --soft: #f0f2f5;
+        --accent: #0f9d8f;
+        --accent-ink: #ffffff;
+        --strong: #1a9e5f;
+        --possible: #c98200;
+        --bad: #e03e3e;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f1216;
+          --card: #171b21;
+          --text: #e8ebef;
+          --muted: #8d96a3;
+          --line: #262c35;
+          --soft: #1e232b;
+          --accent: #2ec4b6;
+          --accent-ink: #062421;
+          --possible: #e0a83e;
+        }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+      main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
+      a { color: inherit; }
+      button, select, input { font: inherit; color: inherit; }
+      button, .button { border-radius: 8px; padding: 8px 14px; border: 1px solid var(--line); background: var(--card); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+      button:hover { border-color: var(--accent); }
+      button:disabled { opacity: 0.55; cursor: default; border-color: var(--line); }
+      .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+      .stop { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
+      .muted { color: var(--muted); }
+      .small { font-size: 12px; }
+
+      nav { display: flex; gap: 4px; margin-bottom: 18px; }
+      nav a { text-decoration: none; padding: 6px 12px; border-radius: 8px; color: var(--muted); font-weight: 600; }
+      nav a.on { background: var(--card); color: var(--text); border: 1px solid var(--line); }
+      header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+      h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; }
+      .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+      .error { background: #fde8e8; color: #9b1c1c; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+      .note { background: color-mix(in srgb, var(--accent) 10%, var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+
+      .status { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+      .ring { --p: 0; width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--soft) 0); flex: none; }
+      .ring span { width: 50px; height: 50px; border-radius: 50%; background: var(--card); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+      .status-text { flex: 1; min-width: 220px; }
+      .status-text b { display: block; font-size: 15px; }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 6px; animation: pulse 1s infinite; }
+      @keyframes pulse { 50% { opacity: 0.2; } }
+
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+      .chip { font-size: 13px; padding: 5px 12px; border-radius: 999px; }
+      .chip b { color: var(--muted); margin-left: 4px; }
+      .chip.on { background: var(--text); color: var(--card); border-color: var(--text); }
+      .chip.on b { color: inherit; opacity: 0.7; }
+
+      .item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+      .item-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+      .item h3 { margin: 0; font-size: 15px; }
+      .tag { align-self: flex-start; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); white-space: nowrap; }
+      .tag.good { background: color-mix(in srgb, var(--strong) 15%, transparent); color: var(--strong); }
+      .tag.warn { background: color-mix(in srgb, var(--possible) 15%, transparent); color: var(--possible); }
+      .tag.bad { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
+      .item ul { margin: 8px 0 0; padding-left: 18px; }
+      .item details { margin-top: 8px; font-size: 13px; }
+      .item summary { cursor: pointer; color: var(--muted); }
+      .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+      .actions button, .actions a { padding: 5px 11px; font-size: 13px; }
+      .empty { text-align: center; padding: 40px 10px; color: var(--muted); background: var(--card); border: 1px dashed var(--line); border-radius: 12px; }
+
+      .drawer-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 10; }
+      .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100vw); background: var(--card); border-left: 1px solid var(--line); transform: translateX(100%); transition: transform 0.25s ease; z-index: 11; display: flex; flex-direction: column; }
+      .open .drawer-back { opacity: 1; pointer-events: auto; }
+      .open .drawer { transform: none; }
+      .drawer-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--line); }
+      .drawer-head h2 { margin: 0 0 4px; font-size: 19px; }
+      .drawer-body { flex: 1; overflow: auto; padding: 8px 22px 30px; }
+      .drawer-body label { display: block; font-weight: 600; margin: 16px 0 6px; }
+      .drawer-body input[type="number"] { width: 90px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+      .check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 400 !important; margin: 6px 0 !important; }
+      input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+      .drawer-tools { display: flex; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--line); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav><a href="jobs.html">Find jobs</a><a href="queue.html" class="on">Auto apply</a><a href="dashboard.html">Dashboard</a></nav>
+      <header>
+        <div>
+          <h1>Auto Apply</h1>
+          <div class="muted">Sends queued jobs one at a time in the background, only when every field matched.</div>
+        </div>
+        <div class="header-actions">
+          <button id="settings-button">Settings</button>
+          <button id="best">Add best matches</button>
+          <button class="primary" id="start">Start</button>
+        </div>
+      </header>
+
+      <div id="error"></div>
+      <div id="notice"></div>
+
+      <section class="status">
+        <div class="ring" id="ring"><span id="ring-text">0</span></div>
+        <div class="status-text">
+          <b id="status-title">Loading...</b>
+          <span class="muted small" id="status-detail"></span>
+        </div>
+      </section>
+
+      <div class="chips" id="chips"></div>
+      <div id="list"></div>
+    </main>
+
+    <div class="drawer-back" id="drawer-back"></div>
+    <aside class="drawer" id="drawer">
+      <div class="drawer-head">
+        <h2>Auto apply settings</h2>
+        <div class="muted small">Saved to profile/scanner.yaml</div>
+      </div>
+      <div class="drawer-body" id="d-body"></div>
+      <div class="drawer-tools" id="d-tools"></div>
+    </aside>
+
+    <script src="queue.js"></script>
+  </body>
+</html>

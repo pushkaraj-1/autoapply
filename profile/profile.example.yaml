@@ -1,0 +1,161 @@
+# Facts about the applicant. Copy this file to profile/profile.yaml and fill it in.
+# Fields set to null are unknown: the tool asks you instead of guessing.
+# Every answer the tool gives comes from this file, your resume and content.md,
+# so read it through once and make sure each line is true for you.
+
+resume_path: ~/Documents/Resume.pdf     # your resume as a PDF
+
+name:
+  first: Alex
+  last: Doe
+  preferred: null        # optional on most forms; leave blank
+pronouns: null           # optional; leave blank
+
+contact:
+  email: alex.doe@example.com
+  phone: "+1 555 123 4567"
+  country: United States
+  address_line1: 123 Main St
+  city: San Francisco
+  state: California
+  state_code: CA
+  postal_code: "94105"
+  full_address: 123 Main St, San Francisco, CA 94105
+
+links:
+  linkedin: https://www.linkedin.com/in/your-profile
+  github: https://github.com/your-username
+  website: null          # portfolio site, if you have one
+
+current_role:
+  company: Example University
+  title: Research Assistant
+
+work_authorization:
+  citizenship: United States        # your country of citizenship
+  us_status: U.S. citizen           # for example "F-1 student visa" or "Green card holder"
+  needs_sponsorship_now_or_future: false
+  # "Are you legally authorized to work in the US?"
+  authorized_to_work_us: true
+  currently_on_opt_or_cpt: false
+  # "Authorized to work without restriction / without sponsorship?"
+  authorized_without_restriction: true
+  # Written visa / sponsorship / work authorization questions get this text, but only
+  # when the field is compulsory. Leave null to be asked instead.
+  statement: null
+  details: null
+  opt_start_date: null
+  graduation_date: 2026-12
+
+history:
+  worked_for_us_government: false
+  # Every employer ever. Any "have you worked for <company>?" question is
+  # answered from this list.
+  employers:
+    - Example Company
+    - Example University
+
+preferences:
+  willing_to_work_onsite: true     # onsite, in-office, relocation and commute questions
+  # Remote vs office questions: choose every arrangement on multi-select, the
+  # "both / any / flexible" option on single choice, and this text otherwise.
+  open_to_any_arrangement: true
+  location_text: Open to any location
+  relocation_assistance: false     # true if you would need help moving
+
+standing_answers:
+  interview_recording_consent: null  # optional on Ashby forms; left blank until set
+  non_compete: false               # "are you bound by a non-compete?"
+  agree_to_certifications: true    # agree to "I certify that..." and arbitration terms on forms
+  cover_letter: generate_if_field_exists
+  salary:                          # expected salary fields
+    text: Flexible
+    number: 100000
+    hourly_text: 40/hr
+    hourly_number: 40
+  # "How did you find this job": text fields get the first one, dropdowns
+  # get the first one they list, else a general online option.
+  job_source: [LinkedIn, Indeed, Google]
+  smoker: null                     # true / false, or null to be asked
+  drinks: null                     # alcohol questions: true / false, or null to be asked
+  accept_stated_salary: true       # "are you okay with this salary / fixed salary?"
+  # Test scores. Remove any you haven't taken.
+  test_scores:
+    gre: null
+  criminal_record: null            # true / false, or null to be asked
+
+# Voluntary self-identification questions. Use "Decline to state" (or null) for any
+# you would rather not answer.
+demographics:
+  sex: Decline to state
+  race: Decline to state
+  race_detail: null                  # for lists that split a race further (for example South Asian)
+  sexual_orientation: Decline to state
+  ethnicity: Decline to state
+  veteran: false
+  disability: false
+
+# school and degree_level use the names application dropdowns list.
+education:
+  - school: Example University
+    school_full: Example University, School of Engineering
+    # School dropdowns: type the search words, then pick the first of these names
+    # the list shows. Any other name is never picked.
+    search: example university
+    names: [Example University]
+    degree: Master of Science in Computer Science
+    degree_level: Master's Degree
+    discipline: Computer Science
+    # Major dropdowns: the first of these the list has, matched exactly.
+    majors: [Computer Science, Computer and Information Science, Computer Science and Engineering]
+    gpa: "3.80 / 4.00"
+    start: 2025-01
+    end: 2026-12
+
+# Skills from your resume, most important first. Workday's Skills box gets each one
+# its list knows; text boxes get them comma-separated.
+skills:
+  - Python
+  - SQL
+  - Git
+
+# Work history, newest first, as it should appear on forms that ask for it
+# (Workday rewrites these from the resume badly, so they are typed in from here).
+experience:
+  - title: Software Engineer Intern
+    company: Example Company
+    location: San Francisco, CA
+    start: 2026-05
+    end: 2026-08       # null if you still work there
+    description: >-
+      One or two lines per bullet from your resume, with the real numbers.
+
+# "Years of experience" fields.
+years_of_experience: 1
+
+languages:
+  - name: English
+    fluent: true
+
+highest_education_completed: Master's Degree
+# Earliest start / availability questions.
+available_start: January 2027
+
+# Notes the AI follows when it writes for you. Keep each one short and true.
+# All of these are optional; delete the ones you don't need.
+ai_context:
+  # A line the AI may never contradict about working in the U.S.
+  work_authorization: The applicant is authorized to work in the United States and does not need sponsorship.
+  # Who you are and what you are looking for, used when the job scanner scores jobs.
+  candidate_summary: >-
+    Graduating with a Master's Degree in Computer Science from Example University in
+    December 2026. About 1 year of experience from internships. Targets: software
+    engineer, new grad.
+  # What the first paragraph of every cover letter says about you.
+  cover_letter_opening: finishing my MS in Computer Science at Example University in December
+  # Which of your projects suit which jobs, and what to leave out of cover letters.
+  cover_letter_notes:
+    - For backend roles prefer the API and database work over the machine learning projects.
+  # Extra guidance for written answers on application forms.
+  answer_notes:
+    - For data questions prefer the analytics project.
