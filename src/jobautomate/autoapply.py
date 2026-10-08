@@ -36,10 +36,15 @@ SERVER = "http://127.0.0.1:8765"
 SHOTS = ROOT / "data" / "autoapply"
 # Sites the queue may submit on by itself (the user approved Workday and Rippling on
 # 2026-10-07, and Oracle Cloud and SuccessFactors on 2026-10-08).
-SITES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "workday": "Workday", "rippling": "Rippling", "oracle": "Oracle Cloud", "successfactors": "SuccessFactors", "icims": "iCIMS"}
+SITES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "workday": "Workday", "rippling": "Rippling", "oracle": "Oracle Cloud", "successfactors": "SuccessFactors", "icims": "iCIMS", "adp": "ADP"}
 # Sites the queue takes but always hands to you: iCIMS shows an hCaptcha challenge
 # as soon as its email step is sent, and captchas are never solved.
-HANDOFF_SITES = {"icims": "iCIMS asks for a captcha right after its email step, which you need to do yourself"}
+# ADP's first step is checked by an invisible reCAPTCHA, and from the queue's browser
+# the emailed code never arrives (checked 2026-10-08); bot checks are never worked around.
+HANDOFF_SITES = {
+    "icims": "iCIMS asks for a captcha right after its email step, which you need to do yourself",
+    "adp": "ADP only emails its sign-in code to a normal browser, so this one needs yours",
+}
 # web_lookups_per_day: web searches (Brave Search, or Google whose free 100 a day are
 # shared with the googlejobs scan source) a day for finding companies' careers sites.
 DEFAULTS = {"daily_cap": 15, "submit": True, "min_fit": 70, "sites": list(SITES), "gap_seconds": 45, "code_wait_minutes": 10, "web_lookups_per_day": 40}
@@ -189,6 +194,7 @@ PAGE_SITES = {
     # and its own apply hosts, including the U.S. government cloud (ns2cloud.com).
     "successfactors": re.compile(r"[?&]ats=successfactors\b|//career\d*\.successfactors\.(com|eu)/|\.sapsf\.(com|eu|cn)/|//career[\w-]*\.ns2cloud\.com/", re.I),
     "icims": re.compile(r"\.icims\.com/|[?&]icims=1\b", re.I),
+    "adp": re.compile(r"//(workforcenow|myjobs)\.adp\.com/", re.I),
 }
 
 

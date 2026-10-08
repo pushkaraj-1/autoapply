@@ -5,7 +5,7 @@
 // description are read from the page too. iCIMS shows its form inside an iframe
 // (?in_iframe=1), where this script also runs.
 
-const GN_HOSTS = /(^|\.)jobs\.gusto\.com$|(^|\.)wellfound\.com$|\.icims\.com$|\.oraclecloud\.com$|\.successfactors\.(com|eu)$|\.sapsf\.(com|eu|cn)$|\.ns2cloud\.com$/;
+const GN_HOSTS = /(^|\.)jobs\.gusto\.com$|(^|\.)wellfound\.com$|\.icims\.com$|\.oraclecloud\.com$|\.successfactors\.(com|eu)$|\.sapsf\.(com|eu|cn)$|\.ns2cloud\.com$|^(workforcenow|myjobs)\.adp\.com$/;
 const GN_ICIMS = /\.icims\.com$/.test(location.hostname);
 // Oracle fills in answers saved from earlier applications to the same company, and
 // from unfinished ones. Its questions are answered again, so an old answer is never sent.

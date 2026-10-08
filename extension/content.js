@@ -52,6 +52,8 @@ function looksLikeApplication() {
   if (srApplyPage()) return srFields().length > 1; // its boxes are inside shadow roots
   // iCIMS / Oracle email steps and SuccessFactors / Oracle forms, which may have no file box yet.
   if (document.querySelector("form#enterEmailForm, input[name=primary-email], .apply-flow-section, #careerform #fbqa_apply, #careerform [role=combobox]")) return true;
+  // ADP: its posting's Apply button and its first step.
+  if (document.querySelector("#recruitment_jobDescription_candidateApply, #guestFirstName")) return true;
   return Boolean(document.querySelector("input[type=email]")) && gnFields(gnForm()).length >= 3;
 }
 

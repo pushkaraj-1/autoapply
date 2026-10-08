@@ -37,6 +37,12 @@ SITES = {
         "code": re.compile(rf"(?:{CODE_WORDS})\b[^0-9]{{0,120}}?\b(\d{{6}})\b|\b(\d{{6}})\b[^0-9]{{0,60}}?(?:{CODE_WORDS})", re.I),
         "company_in": "anywhere",
     },
+    # ADP Workforce Now sends the code itself (from adp.com), not always naming the company.
+    "adp": {
+        "searches": ['FROM "adp.com" BODY "code"', 'TEXT "{company}" BODY "code"'],
+        "code": re.compile(rf"(?:{CODE_WORDS}|\bcode\b)\b[^0-9]{{0,120}}?\b(\d{{6,8}})\b|\b(\d{{6,8}})\b[^0-9]{{0,60}}?(?:{CODE_WORDS}|\bcode\b)", re.I),
+        "company_in": "none",
+    },
 }
 
 def configured() -> bool:
@@ -86,7 +92,7 @@ def find_code(since: datetime, company: str, site: str = "greenhouse") -> str | 
             body = " ".join(_text(message).split())
             sender = str(make_header(decode_header(message.get("From", ""))))
             where = subject if rules["company_in"] == "subject" else f"{sender} {subject} {body}"
-            if not _same_company(where, company):
+            if rules["company_in"] != "none" and not _same_company(where, company):
                 continue
             match = rules["code"].search(body)
             if match:

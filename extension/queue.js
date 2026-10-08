@@ -9,7 +9,7 @@ const GROUPS = [
   ["sent", "Sent"],
   ["other", "Other"],
 ];
-const SITE_NAMES = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", workday: "Workday", rippling: "Rippling", oracle: "Oracle Cloud", successfactors: "SuccessFactors", icims: "iCIMS (hands to you)" };
+const SITE_NAMES = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", workday: "Workday", rippling: "Rippling", oracle: "Oracle Cloud", successfactors: "SuccessFactors", icims: "iCIMS (hands to you)", adp: "ADP (hands to you)" };
 const siteList = () => data.settings.sites.map((s) => SITE_NAMES[s] || s).join(", ").replace(/, ([^,]*)$/, " and $1");
 
 let data = null;

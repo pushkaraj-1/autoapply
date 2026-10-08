@@ -26,11 +26,15 @@ function liReadJob() {
     if (card && card.querySelector('a[href*="/company/"]') && card.querySelector("h1, h2")) break;
   }
   card = card || document.body;
-  const heading = card.querySelector("h1") || card.querySelector("h2");
+  // LinkedIn's own section headings, which are never the job's title.
+  const SECTION = /^(people you can reach out to|about the job|about the company|meet the hiring team|show more|more jobs|job search faster|premium|similar jobs)/i;
+  const heading = [...card.querySelectorAll("h1, h2")].find((h) => clean(h.innerText) && !SECTION.test(clean(h.innerText)));
   const companyLink = [...card.querySelectorAll('a[href*="/company/"]')].map((a) => clean(a.innerText)).find((t) => t && t.length < 80);
   // "ML Engineer | Proxima | LinkedIn" on a job's own page.
   const parts = clean(document.title.replace(/^\(\d+\)\s*/, "")).split(" | ");
-  const title = clean(heading && heading.innerText) || (label.match(/apply to (.+?)(?: on company website)?$/i) || [])[1] || (parts.length >= 3 ? parts[0] : "");
+  // The Apply button names the job ("Apply to AI Engineer on company website"); a
+  // job's own page has it in the tab title too. Headings come last.
+  const title = clean((label.match(/^apply to (.+?)(?: on (?:the )?company(?:'s)? website)?$/i) || [])[1]) || (location.pathname.startsWith("/jobs/view/") && parts.length >= 3 ? parts[0] : "") || clean(heading && heading.innerText);
   const company = companyLink || (parts.length >= 3 ? parts[1] : "");
   // "Greater Boston · 1 hour ago · 82 people clicked apply"
   const line = [...card.querySelectorAll("span, div, p")].map((e) => clean(e.innerText)).find((t) => /^[^·]{2,60} · /.test(t) && t.length < 200);

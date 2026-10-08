@@ -175,7 +175,7 @@ async function apply(job) {
 
 // Jobs the auto apply queue can send by itself: Greenhouse, Lever, Ashby, Workday and
 // Rippling forms, and company career pages that show a Greenhouse form (?gh_jid=).
-const QUEUE_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|myworkday\.com)$|^ats\.rippling\.com$|\.oraclecloud\.com$|\.icims\.com$/;
+const QUEUE_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|myworkday\.com)$|^ats\.rippling\.com$|\.oraclecloud\.com$|\.icims\.com$|^(workforcenow|myjobs)\.adp\.com$/;
 const QUEUE_LABELS = { queued: "Queued", running: "Filling", submitted: "Sent", needs_you: "Needs you", unconfirmed: "Check email", ready: "Test run", skipped: "Skipped", failed: "Failed" };
 
 function queueButton(job) {

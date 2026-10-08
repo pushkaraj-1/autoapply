@@ -12,22 +12,34 @@ const ATS_ORACLE = /\.oraclecloud\.com$/.test(location.hostname) && location.pat
 // U.S. government cloud, career-*.ns2cloud.com (L3Harris); company career sites
 // built on SuccessFactors are recognised by their Apply controls.
 const ATS_SF_APPLY = /^career\d*\.successfactors\.(com|eu)$|\.sapsf\.(com|eu|cn)$|^career[\w-]*\.ns2cloud\.com$/.test(location.hostname);
+// ADP Workforce Now's recruiting pages (company career sites run by ADP).
+const ATS_ADP = /^(workforcenow|myjobs)\.adp\.com$/.test(location.hostname);
 const atsSfPosting = () => Boolean(document.querySelector("a.dialogApplyBtn, [id^='applyOption-'], .btn-social-apply"));
 
 function atsPlatform() {
   if (ATS_ICIMS) return "icims";
   if (ATS_ORACLE) return "oracle";
+  if (ATS_ADP) return "adp";
   if (ATS_SF_APPLY || atsSfPosting()) return "successfactors";
   return null;
 }
 
-const ATS_NAMES = { icims: "iCIMS", oracle: "Oracle", successfactors: "SuccessFactors" };
+const ATS_NAMES = { icims: "iCIMS", oracle: "Oracle", successfactors: "SuccessFactors", adp: "ADP" };
 
 // ---- the posting page: open the application ----
 
 // Returns a message once it has opened the application, or null when this isn't a
 // posting page it knows.
 async function atsOpenApplication() {
+  // ADP: the posting's Apply, then its consent dialog; the first step opens on the same page.
+  const adpApply = ATS_ADP && document.getElementById("recruitment_jobDescription_candidateApply");
+  if (adpApply && adpApply.offsetParent && !document.getElementById("guestFirstName")) {
+    adpApply.click();
+    const consent = await waitFor(() => [...document.querySelectorAll("sdf-button, button")].find((b) => b.offsetParent && /^consent (&|and) continue$/i.test((b.innerText || b.textContent || "").trim())), 6000);
+    if (consent) consent.click();
+    await waitFor(() => document.getElementById("guestFirstName"), 8000);
+    return null; // carries on with the first step (atsWall)
+  }
   if (ATS_ORACLE && /\/job\/\d+\/?$/.test(location.pathname) && document.querySelector("button.apply-now-button")) {
     location.href = `${location.origin}${location.pathname.replace(/\/$/, "")}/apply/email`;
     return "I opened Oracle's application. Once it loads, click Fill this application again.";
@@ -59,6 +71,11 @@ async function atsOpenApplication() {
 
 // Which screen this is, or null for an application form (or anything else).
 function atsWall() {
+  if (ATS_ADP) {
+    const shown = (id) => document.getElementById(id)?.getClientRects().length;
+    if (shown("oneTimePassWord")) return "adp-code";
+    if (shown("guestFirstName")) return "adp-guest";
+  }
   if (ATS_ICIMS && (document.querySelector("form#enterEmailForm, input[name=css_loginName]") || /\/(login|connect)$/.test(location.pathname))) return "icims-email";
   if (ATS_ORACLE) {
     if (document.querySelector(".pin-code-input__input")) return "oracle-pin";
@@ -86,7 +103,33 @@ const wallSite = {
     const wall = atsWall();
     const email = await new Promise((resolve) => chrome.runtime.sendMessage({ type: "api", path: "/profile/email" }, (reply) => resolve(reply && reply.ok ? reply.data.email : "")));
     let summary;
-    if (wall === "icims-email") {
+    if (wall === "adp-guest") {
+      const job = typeof gnJobInfo === "function" ? await gnJobInfo() : { title: "", company: "", description: "" };
+      const reply = await api("/answer", { url: location.href, job, fields: [] });
+      const profile = (reply && reply.ok && reply.data.profile) || {};
+      const name = profile.name || {};
+      const contact = profile.contact || {};
+      const put = (id, value) => {
+        const box = document.getElementById(id);
+        if (box && value && !box.value) fillText(box, value);
+      };
+      put("guestFirstName", name.first);
+      put("guestLastName", name.last);
+      put("guestEmail", contact.email || email);
+      const country = document.getElementById("phoneCountry");
+      const us = country && [...country.options].find((o) => /^united states/i.test(o.text.trim()));
+      if (us && country.value !== us.value) {
+        country.value = us.value;
+        country.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      // The mobile box starts with the country's "+1" in it, which isn't a number yet.
+      const phone = document.getElementById("login_view_phone");
+      const digits = String(contact.phone || "").replace(/\D/g, "").slice(-10);
+      if (phone && digits && String(phone.value).replace(/\D/g, "").length < 7) fillText(phone, `+1${digits}`);
+      summary = "This is ADP's first step. I filled your name, email and mobile number. Click Continue yourself; ADP emails you a verification code (check Spam too). Enter it and click Verify, then click Fill this application on the form.";
+    } else if (wall === "adp-code") {
+      summary = "ADP emailed you a verification code (check Spam too). Type it in and click Verify, then click Fill this application on the form.";
+    } else if (wall === "icims-email") {
       const box = document.querySelector("input[name=css_loginName], form#enterEmailForm input[type=email]");
       if (box && email && !box.value) fillText(box, email);
       // Consent: "Continue" in its dropdown (some sites), then the I agree box.
@@ -128,6 +171,11 @@ const wallSite = {
 
 // Title and company for these platforms, or null to use the general reading.
 function atsJobInfo() {
+  if (ATS_ADP) {
+    const heading = document.querySelector(".job-description-title, h2");
+    const body = document.querySelector(".job-description-data, .job-description, main");
+    return { title: clean(heading ? heading.innerText : ""), company: "", description: clean(body ? body.innerText : "").slice(0, 12000) };
+  }
   if (ATS_ORACLE) {
     const company = document.querySelector('meta[property="og:site_name"]');
     const heading = document.querySelector("h1.job-details__title, h1");
