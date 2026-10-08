@@ -9,7 +9,8 @@ const GROUPS = [
   ["sent", "Sent"],
   ["other", "Other"],
 ];
-const SITE_NAMES = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby" };
+const SITE_NAMES = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", workday: "Workday", rippling: "Rippling", oracle: "Oracle Cloud", successfactors: "SuccessFactors", icims: "iCIMS (hands to you)" };
+const siteList = () => data.settings.sites.map((s) => SITE_NAMES[s] || s).join(", ").replace(/, ([^,]*)$/, " and $1");
 
 let data = null;
 let group = "needs";
@@ -92,7 +93,7 @@ function renderStatus() {
   const queued = data.entries.filter((e) => e.status === "queued").length;
   const title = $("status-title");
   if (data.running) {
-    title.replaceChildren(el("span", { class: "dot" }), data.stopping ? "Stopping after this job..." : data.current ? `Working on ${data.current.title} at ${data.current.company}` : data.message);
+    title.replaceChildren(el("span", { class: "dot" }), data.stopping ? "Stopping..." : data.skipping ? "Skipping this job..." : data.current ? `Working on ${data.current.title} at ${data.current.company}` : data.message);
   } else {
     title.textContent = data.message || (queued ? `${queued} job${queued === 1 ? "" : "s"} waiting. Click Start to send them.` : "Nothing queued yet.");
   }
@@ -102,8 +103,55 @@ function renderStatus() {
   $("status-detail").textContent = detail.join(" ");
   const start = $("start");
   start.textContent = data.running ? (data.stopping ? "Stopping..." : "Stop") : "Start";
+  start.title = data.running ? "Stop the queue now. The job being filled goes back in line." : "";
+  const skip = $("skip");
+  skip.hidden = !data.running || !data.current;
+  skip.disabled = Boolean(data.stopping || data.skipping);
+  skip.textContent = data.skipping ? "Skipping..." : "Skip this job";
   start.className = data.running ? "stop" : "primary";
   start.disabled = data.stopping || (!data.running && !queued);
+}
+
+let codeShownFor = null;
+
+function renderCode() {
+  const request = data.code_request;
+  document.title = request ? "Code needed · Auto apply" : "Auto apply";
+  if (!request) {
+    codeShownFor = null;
+    $("code").replaceChildren();
+    return;
+  }
+  if (codeShownFor === request.job_id) return; // keep what you are typing
+  codeShownFor = request.job_id;
+  const input = el("input", { type: "text", autocomplete: "one-time-code", placeholder: "Code", maxlength: 12, required: true });
+  const form = el(
+    "form",
+    {
+      onsubmit: (event) => {
+        event.preventDefault();
+        act("/queue/code", { method: "POST", body: JSON.stringify({ job_id: request.job_id, code: input.value.trim() }) }, () => showNotice("Code sent. The queue is entering it and submitting."));
+      },
+    },
+    input,
+    el("button", { class: "primary", type: "submit" }, "Send code"),
+  );
+  $("code").replaceChildren(
+    el(
+      "div",
+      { class: "code-box" },
+      el("b", {}, `${request.company} emailed you a security code`),
+      el(
+        "span",
+        { class: "small" },
+        request.reading_email
+          ? `For ${request.title}. The queue is reading it from your inbox and will enter it by itself. If you see the email first, you can type the code here.`
+          : `For ${request.title}. Copy it from your email and type it here; the queue enters it and submits. It waits up to ${request.minutes} minutes.`,
+      ),
+      form,
+    ),
+  );
+  input.focus();
 }
 
 function tagFor(entry) {
@@ -148,6 +196,7 @@ function item(entry) {
 
 function render() {
   renderStatus();
+  renderCode();
   const counts = Object.fromEntries(GROUPS.map(([key]) => [key, 0]));
   for (const entry of data.entries) counts[groupOf(entry)]++;
   $("chips").replaceChildren(
@@ -161,7 +210,15 @@ function render() {
     sent: "Nothing sent yet.",
     other: "Nothing here.",
   };
-  $("list").replaceChildren(...(list.length ? list.map(item) : [el("div", { class: "empty" }, empty[group])]));
+  const items = list.length ? list.map(item) : [el("div", { class: "empty" }, empty[group])];
+  const open = list.filter((e) => !e.applied && ["needs_you", "unconfirmed"].includes(e.status));
+  if (group === "needs" && open.length > 1) {
+    const batch = open.slice(0, 5);
+    items.unshift(
+      el("div", { class: "list-tools" }, el("button", { class: "primary", onclick: () => batch.forEach(openAndFill) }, `Open and fill ${batch.length === open.length ? "all" : `the next ${batch.length}`} in my browser`)),
+    );
+  }
+  $("list").replaceChildren(...items);
 }
 
 // ---- actions ----
@@ -184,16 +241,21 @@ const retry = (entry) => act("/queue", { method: "POST", body: JSON.stringify({ 
 const remove = (entry) => act(`/queue/${entry.job_id}`, { method: "DELETE" });
 const markApplied = (entry) => act(`/jobs/${entry.job_id}/applied`, { method: "POST", body: JSON.stringify({ on: true }) });
 
-$("best").addEventListener("click", () =>
-  act("/queue/best", { method: "POST", body: JSON.stringify({ limit: 20 }) }, (result) => {
+$("best").addEventListener("click", () => {
+  showNotice("Looking for matches. Jobs the AI hasn't checked yet are being scored now, which can take a minute...");
+  $("best").disabled = true;
+  act("/queue/best", { method: "POST", body: JSON.stringify({ limit: 50 }) }, (result) => {
     group = "queued";
+    const scored = result.scored_now ? ` Scored ${result.scored_now} new job${result.scored_now === 1 ? "" : "s"} with the AI first.` : "";
     showNotice(
       result.added.length
-        ? `Added ${result.added.length} job${result.added.length === 1 ? "" : "s"}: Greenhouse, Lever and Ashby jobs the AI recommends with a fit of ${data.settings.min_fit} or more.`
-        : `No new jobs to add. The queue only takes Greenhouse, Lever and Ashby jobs the AI recommends with a fit of ${data.settings.min_fit} or more. Run Check fit with AI on the Find jobs page to find more.`,
+        ? `Added ${result.added.length} job${result.added.length === 1 ? "" : "s"} the AI recommends with a fit of ${data.settings.min_fit} or more.${scored}`
+        : `No new jobs to add out of ${result.considered} the queue can send.${scored} The queue sends ${siteList()} forms the AI recommends with a fit of ${data.settings.min_fit} or more; scan for more jobs on the Find jobs page.`,
     );
-  }),
-);
+  }).finally(() => ($("best").disabled = false));
+});
+
+$("skip").addEventListener("click", () => act("/queue/skip", { method: "POST" }));
 
 $("start").addEventListener("click", () => {
   if (data.running) return act("/queue/stop", { method: "POST" });
@@ -207,7 +269,8 @@ $("start").addEventListener("click", () => {
 
 function openSettings() {
   const s = data.settings;
-  const cap = el("input", { type: "number", min: 1, max: 100, value: s.daily_cap });
+  const cap = el("input", { type: "number", min: 1, max: 1000, value: s.daily_cap });
+  const lookups = el("input", { type: "number", min: 0, max: 2000, value: s.web_lookups_per_day ?? 40 });
   const minFit = el("input", { type: "number", min: 0, max: 100, value: s.min_fit });
   const gap = el("input", { type: "number", min: 10, max: 600, value: s.gap_seconds });
   const testMode = el("input", { type: "checkbox", checked: !s.submit });
@@ -217,12 +280,14 @@ function openSettings() {
     el("label", {}, "Add best matches takes jobs with an AI fit of at least"), minFit,
     el("label", {}, "Seconds to wait between applications"), gap,
     el("label", {}, "Sites to send by itself"), ...sites,
+    el("label", {}, "Web searches a day for finding companies' own sites (for LinkedIn, Indeed and other listings)"), lookups,
+    el("div", { class: "hint" }, `Search service: ${data.search || "unknown"}`),
     el("label", {}, "Test mode"),
     el("label", { class: "check" }, testMode, "Fill and check forms, but don't press Submit"),
   );
   $("d-tools").replaceChildren(
     el("button", { class: "primary", onclick: () => act("/queue/settings", { method: "PUT", body: JSON.stringify({
-      daily_cap: Number(cap.value), min_fit: Number(minFit.value), gap_seconds: Number(gap.value), submit: !testMode.checked,
+      daily_cap: Number(cap.value), min_fit: Number(minFit.value), gap_seconds: Number(gap.value), submit: !testMode.checked, web_lookups_per_day: Number(lookups.value),
       sites: [...document.querySelectorAll("[data-site]")].filter((b) => b.checked).map((b) => b.dataset.site),
     }) }, closeSettings) }, "Save"),
     el("button", { onclick: closeSettings }, "Cancel"),

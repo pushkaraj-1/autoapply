@@ -55,6 +55,36 @@ const ripplingSite = {
       const combobox = box && box.querySelector("[role=combobox]");
       if (!combobox) throw new Error("field not found on the page");
       await chooseRipplingOption(combobox, value);
+    } else if (field.kind === "enum") {
+      // Radio buttons (labels you click) or a dropdown, depending on the question.
+      const box = ripplingBox(field.id);
+      if (!box) throw new Error("field not found on the page");
+      const radios = [...box.querySelectorAll("[role=radio]")];
+      if (radios.length) {
+        for (const want of [value].flat()) {
+          const choice = matchText(radios, want);
+          if (!choice) throw new Error(`no option "${want}" (saw: ${radios.map((r) => clean(r.innerText)).join(" / ")})`);
+          if (choice.getAttribute("aria-checked") !== "true") realClick(choice);
+        }
+        await sleep(150);
+      } else {
+        const combobox = box.querySelector("[role=combobox]");
+        if (!combobox) throw new Error("field not found on the page");
+        for (const want of [value].flat()) await chooseRipplingOption(combobox, want);
+      }
+    } else if (field.kind === "date") {
+      const box = ripplingBox(field.id);
+      const m = String(value).match(/^(\d{4})-(\d{2})(?:-(\d{2}))?/);
+      if (!box || !m) throw new Error(box ? `can't read "${value}" as a date` : "field not found on the page");
+      for (const [part, text] of [["month", m[2]], ["day", m[3] || "15"], ["year", m[1]]]) {
+        const input = box.querySelector(`[data-testid="input-${part}"]`);
+        if (!input) throw new Error(`no ${part} box`);
+        input.focus();
+        input.select();
+        if (!document.execCommand("insertText", false, text) || input.value.replace(/\D/g, "") !== text.replace(/^0/, "") && input.value !== text) setNativeValue(input, text);
+        input.blur();
+      }
+      await sleep(150);
     } else if (field.kind === "location") {
       await chooseRipplingLocation(ripplingInput(field), value);
     } else if (field.kind === "text") {
@@ -66,10 +96,31 @@ const ripplingSite = {
     }
   },
 
+  async optionsFor(field) {
+    const box = ripplingBox(field.id);
+    const radios = box ? [...box.querySelectorAll("[role=radio]")].map((r) => clean(r.innerText)) : [];
+    return radios.length ? radios : field.options || [];
+  },
+
   check(field, value, ctx) {
     if (field.kind === "file") {
       const box = ripplingInput(field) && ripplingInput(field).closest('[data-testid="field"]');
       return box && box.innerText.includes(fileFor(value, ctx).name) ? null : "file did not attach";
+    }
+    if (field.kind === "enum") {
+      const box = ripplingBox(field.id);
+      if (!box) return "field not found on the page";
+      const radios = [...box.querySelectorAll("[role=radio]")];
+      const shown = radios.length
+        ? radios.filter((r) => r.getAttribute("aria-checked") === "true" || (r.querySelector("input") || {}).checked || (box.querySelector(`input[type=radio][value="${CSS.escape(clean(r.innerText))}"]`) || {}).checked).map((r) => clean(r.innerText))
+        : [clean((box.querySelector("[role=combobox]") || {}).innerText || "")];
+      const missing = [value].flat().filter((v) => !shown.some((s) => s.toLowerCase() === String(v).toLowerCase()));
+      return missing.length ? `page shows "${shown.join(", ")}"` : null;
+    }
+    if (field.kind === "date") {
+      const box = ripplingBox(field.id);
+      const parts = box ? ["month", "day", "year"].map((p) => (box.querySelector(`[data-testid="input-${p}"]`) || {}).value || "") : [];
+      return parts.every(Boolean) ? null : `page shows "${parts.join("/")}"`;
     }
     if (field.kind === "select") {
       const combobox = ripplingBox(field.id) && ripplingBox(field.id).querySelector("[role=combobox]");

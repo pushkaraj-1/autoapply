@@ -198,3 +198,44 @@ fetch(`${SERVER}/jobs/progress`)
 $("dashboard").addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
 });
+
+// ---- LinkedIn: queue the job on this tab ----
+
+// Shown on LinkedIn job pages only. The page is read once, when you click; then you
+// click LinkedIn's own Apply, and the extension catches the company page it opens.
+(async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !/^https:\/\/www\.linkedin\.com\/jobs\//.test(tab.url || "")) return;
+  $("linkedin").hidden = false;
+  const { linkedinResult } = await chrome.storage.session.get("linkedinResult");
+  if (linkedinResult && Date.now() - linkedinResult.at < 10 * 60 * 1000) $("li-step").textContent = `Last one: ${linkedinResult.title}. ${linkedinResult.message}`;
+  $("li-queue").addEventListener("click", async () => {
+    $("li-queue").disabled = true;
+    let job;
+    try {
+      [{ result: job }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: liReadJob });
+    } catch (error) {
+      $("li-job").textContent = `Couldn't read the page: ${error.message}`;
+      $("li-queue").disabled = false;
+      return;
+    }
+    if (!job || !job.found) {
+      $("li-job").textContent = "No Apply button found. Open a job so its details show, then try again.";
+      $("li-queue").disabled = false;
+      return;
+    }
+    $("li-job").textContent = `${job.title || "(no title)"} at ${job.company || "(no company)"}${job.location ? `, ${job.location}` : ""}`;
+    if (job.easy) {
+      $("li-step").textContent = "This is Easy Apply, which stays on LinkedIn, so the queue can't apply to it.";
+      return;
+    }
+    if (!job.title || !job.company) {
+      $("li-step").textContent = "Couldn't read this job's title and company. Scroll to the job's details and try again.";
+      $("li-queue").disabled = false;
+      return;
+    }
+    await new Promise((resolve) => chrome.runtime.sendMessage({ type: "linkedinCapture", tabId: tab.id, job }, resolve));
+    $("li-queue").textContent = "Waiting for you to click Apply...";
+    $("li-step").textContent = "Now click LinkedIn's Apply button on the job. I'll catch the company's page, close it, and queue the job. A notification tells you how it went.";
+  });
+})();

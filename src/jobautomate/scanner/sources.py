@@ -33,6 +33,8 @@ from urllib.parse import quote, urlencode, urlparse
 
 import httpx
 
+from jobautomate.scanner import careers
+
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 TIMEOUT = 15
 
@@ -580,6 +582,10 @@ def fetch_google_jobs(cfg: dict, terms: list[str]) -> list[dict]:
             if cfg.get("date_restrict"):
                 params["dateRestrict"] = cfg["date_restrict"]
             try:
+                if careers.google_left() <= 0:
+                    out.append({"__error": "googlejobs: today's 100 free Google searches are used up"})
+                    return out
+                careers.google_used()  # shared with the careers-site lookups
                 batch = parse_google_jobs(get_json("https://www.googleapis.com/customsearch/v1?" + urlencode(params)))
                 queries += 1
                 out += batch
@@ -606,6 +612,9 @@ def parse_jobspy_rows(rows: list[dict]) -> list[dict]:
         job = offer(row.get("title"), row.get("job_url") or row.get("url", ""), row.get("company") or "", location, to_iso_date(str(row.get("date_posted") or "")), f"jobspy:{row.get('site') or 'job'}")
         # Indeed and ZipRecruiter block plain page requests later, so keep the description now.
         job["description"] = (row.get("description") or "").strip()
+        # The employer's own link (Indeed gives it for most jobs; ZipRecruiter's go
+        # through a click-tracking redirect), which leads to the company's real form.
+        job["direct_url"] = (row.get("job_url_direct") or "").strip()
         out.append(job)
     return valid(out)
 

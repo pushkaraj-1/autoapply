@@ -36,6 +36,7 @@ KINDS = {
     "LongText": "text",
     "Number": "text",
     "Url": "text",
+    "Date": "date",
     "File": "file",
     "Boolean": "boolean",
     "ValueSelect": "radio",

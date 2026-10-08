@@ -173,8 +173,9 @@ async function apply(job) {
   call(`/jobs/${job.id}`, { method: "PATCH", body: JSON.stringify({ opened: true }) }).catch(() => {});
 }
 
-// Jobs the auto apply queue can send by itself (Greenhouse, Lever and Ashby forms).
-const QUEUE_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com)$/;
+// Jobs the auto apply queue can send by itself: Greenhouse, Lever, Ashby, Workday and
+// Rippling forms, and company career pages that show a Greenhouse form (?gh_jid=).
+const QUEUE_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|myworkday\.com)$|^ats\.rippling\.com$|\.oraclecloud\.com$|\.icims\.com$/;
 const QUEUE_LABELS = { queued: "Queued", running: "Filling", submitted: "Sent", needs_you: "Needs you", unconfirmed: "Check email", ready: "Test run", skipped: "Skipped", failed: "Failed" };
 
 function queueButton(job) {
@@ -183,7 +184,7 @@ function queueButton(job) {
   try {
     host = new URL(job.apply_url).hostname;
   } catch {}
-  if (job.applied || !QUEUE_HOSTS.test(host)) return null;
+  if (job.applied || !(QUEUE_HOSTS.test(host) || /[?&](gh_jid|ats=successfactors|icims=1)\b/.test(job.apply_url))) return null;
   return el("button", { class: "queue", title: "Add to the auto apply queue", onclick: () => queueJob(job) }, "Queue");
 }
 
@@ -228,9 +229,10 @@ function showProgress(p) {
   $("scan").disabled = Boolean(p.running);
   $("scan").textContent = p.running ? "Scanning..." : "Scan for new jobs";
   const scoring = p.phase === "score";
+  const found = p.matched ? `, ${p.matched} found on the company's own site` : "";
   $("scan-title").textContent = p.running
-    ? scoring ? `Checking fit with AI: ${p.scored} of ${p.to_score}` : "Scanning job sources..."
-    : p.error ? `The scan stopped: ${p.error}` : `Scan finished. ${p.added} new job${p.added === 1 ? "" : "s"}${p.to_score ? `, ${p.scored} checked with AI` : ""}.`;
+    ? scoring ? `Checking fit with AI: ${p.scored} of ${p.to_score}` : p.phase === "match" ? `Finding ${p.to_match} LinkedIn, Indeed and other listings on the companies' own sites...` : "Scanning job sources..."
+    : p.error ? `The scan stopped: ${p.error}` : `Scan finished. ${p.added} new job${p.added === 1 ? "" : "s"}${found}${p.to_score ? `, ${p.scored} checked with AI` : ""}.`;
   $("scan-numbers").textContent = p.stale ? `${p.stale} older than your date limit skipped` : "";
   $("scan-sources").replaceChildren(
     ...(p.sources || []).map((s) => el("span", { class: `source ${s.state}`, title: s.state === "done" ? `found ${s.found}, ${s.added} new, in ${s.seconds ?? "?"} seconds` : s.state }, `${sourceName(s.key)}${s.state === "done" ? ` +${s.added}` : ""}`)),

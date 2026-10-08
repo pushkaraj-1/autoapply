@@ -13,7 +13,7 @@ import httpx
 from jobautomate.greenhouse import Field
 
 URL_PATTERN = re.compile(
-    r"https://(?P<host>(?P<tenant>[^./]+)\.fa\.[^/]+\.oraclecloud\.com)/hcmUI/CandidateExperience/(?P<lang>[a-z]{2})/sites/(?P<site>[^/]+)/(?:job|requisitions/preview)/(?P<id>\d+)"
+    r"https://(?P<host>(?P<tenant>[^./]+)\.fa(?:\.[^/]+)?\.oraclecloud\.com)/hcmUI/CandidateExperience/(?P<lang>[a-z]{2})/sites/(?P<site>[^/]+)/(?:job|requisitions/preview)/(?P<id>\d+)"
 )
 
 

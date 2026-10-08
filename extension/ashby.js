@@ -62,6 +62,14 @@ async function chooseAshbyLocation(box, place) {
   );
 }
 
+// "2026-12-15" or "2026-12" as the date box's MM/DD/YYYY.
+function ashbyDate(value) {
+  const m = String(value).match(/^(\d{4})-(\d{2})(?:-(\d{2}))?/);
+  if (m) return `${m[2]}/${m[3] || "15"}/${m[1]}`;
+  const parsed = new Date(String(value));
+  return isNaN(parsed) ? "" : `${String(parsed.getMonth() + 1).padStart(2, "0")}/${String(parsed.getDate()).padStart(2, "0")}/${parsed.getFullYear()}`;
+}
+
 async function chooseAshbyOption(box, value) {
   await ashbyCombobox(box, String(value), (options) => matchText(options, String(value)) || null, `option "${value}"`);
 }
@@ -85,12 +93,29 @@ const ashbySite = {
     } else if (field.kind === "radio") {
       pickChoice(box, "radio", value);
     } else if (field.kind === "checkboxes") {
-      for (const item of value) pickChoice(box, "checkbox", item);
+      for (const item of [value].flat()) pickChoice(box, "checkbox", item); // one answer or a list; never letter by letter
     } else if (field.kind === "location") {
       await chooseAshbyLocation(box, value);
+    } else if (field.kind === "date") {
+      const input = box.querySelector("input");
+      const text = ashbyDate(value);
+      if (!input || !text) throw new Error(`can't read "${value}" as a date`);
+      input.focus();
+      input.select();
+      if (!document.execCommand("insertText", false, text) || input.value !== text) setNativeValue(input, text);
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter", keyCode: 13 }));
+      input.blur();
+      await sleep(150);
     } else {
       throw new Error(`don't know how to fill a "${field.kind}" field`);
     }
+  },
+
+  async optionsFor(field) {
+    const box = fieldBox(field.id);
+    if (!box) return [];
+    const radios = choiceInputs(box, "radio").map((c) => clean(c.label.innerText));
+    return radios.length ? radios : field.options || [];
   },
 
   check(field, value, ctx) {
@@ -116,6 +141,7 @@ const ashbySite = {
       const missing = wanted.filter((w) => !checked.some((c) => c.toLowerCase().startsWith(w.toLowerCase())));
       return missing.length ? `not selected: ${missing.join(", ")}` : null;
     }
+    if (field.kind === "date") return box.querySelector("input").value === ashbyDate(value) ? null : `page shows "${box.querySelector("input").value}"`;
     if (field.kind === "location") {
       const shown = box.querySelector("input").value;
       return shown.includes(value.split(",")[0]) ? null : `page shows "${shown}"`;

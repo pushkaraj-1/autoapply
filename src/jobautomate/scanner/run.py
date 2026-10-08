@@ -12,7 +12,7 @@ from ruamel.yaml import YAML
 
 from jobautomate import tracker
 from jobautomate.profile import ROOT
-from jobautomate.scanner import deep, jd, store
+from jobautomate.scanner import careers, deep, jd, store
 from jobautomate.scanner.filters import company_role_key, fit_scorer, location_filter, title_filter, within_days
 from jobautomate.scanner.sources import FETCHERS, NoCredentials, describe
 
@@ -183,6 +183,18 @@ def _scan(only: list[str] | None) -> None:
                 set_progress(sources=list(status.values()), notices=list(notices), added=len(new_offers), stale=stale)
 
         STATE_PATH.write_text(json.dumps({"last_scan": datetime.now().isoformat(timespec="seconds")}))
+        # New jobs from LinkedIn, Indeed and the like: their companies' own forms, so
+        # the queue can take them (see careers.py).
+        listed = [store.get_job(store.job_id(o["url"])) for o in new_offers if careers.is_aggregator(o["url"])]
+        if listed:
+            set_progress(phase="match", to_match=len(listed))
+            from jobautomate import autoapply  # imported here: autoapply imports this module
+
+            try:
+                set_progress(matched=autoapply.match_forms([j for j in listed if j]))
+            except Exception as error:
+                with _lock:
+                    _progress.setdefault("notices", []).append(f"Finding company forms: {describe(error)}")
         set_progress(new_ids=[store.job_id(o["url"]) for o in new_offers])
         settings_ = config.get("deep_score") or {}
         if settings_.get("enabled", True) and new_offers:
@@ -195,18 +207,19 @@ def _scan(only: list[str] | None) -> None:
         set_progress(running=False, phase="done", error=describe(error), finished_at=datetime.now().isoformat(timespec="seconds"))
 
 
+def score_one(job: dict) -> None:
+    """The AI fit check for one job, saved with the job."""
+    text, via = (job["description"], "scan") if len(job.get("description") or "") >= 200 else jd.fetch_jd(job["url"])
+    result = deep.score(job, text, via)
+    store.update_job(job["id"], deep_fit=result["fit"], verdict=result["verdict"], recommend=int(result["recommend"]), reasons=result["reasons"], gaps=result["gaps"], red_flags=result["red_flags"], jd_via=result["jd_via"], scored_at=result["scored_at"], description=text if len(text) >= 200 else job.get("description"))
+
+
 def _score(jobs: list[dict]) -> None:
     set_progress(phase="score", to_score=len(jobs), scored=0)
     done = 0
-
-    def check(job: dict) -> None:
-        text, via = (job["description"], "scan") if len(job.get("description") or "") >= 200 else jd.fetch_jd(job["url"])
-        result = deep.score(job, text, via)
-        store.update_job(job["id"], deep_fit=result["fit"], verdict=result["verdict"], recommend=int(result["recommend"]), reasons=result["reasons"], gaps=result["gaps"], red_flags=result["red_flags"], jd_via=result["jd_via"], scored_at=result["scored_at"], description=text if len(text) >= 200 else job.get("description"))
-
     try:
         with ThreadPoolExecutor(SCORE_WORKERS) as pool:
-            for future in as_completed([pool.submit(check, job) for job in jobs]):
+            for future in as_completed([pool.submit(score_one, job) for job in jobs]):
                 try:
                     future.result()
                 except Exception as error:
@@ -245,6 +258,10 @@ def apply_url(url: str) -> str:
         return parsed._replace(path=path + "/apply", fragment="").geturl()
     if host == "jobs.ashbyhq.com" and path.count("/") == 2:
         return parsed._replace(path=path + "/application", query="", fragment="").geturl()
+    if host == "ats.rippling.com" and "/jobs/" in path and not path.endswith("/apply"):
+        return parsed._replace(path=path + "/apply", fragment="").geturl()
+    if host.endswith(".icims.com") and path.startswith("/jobs/") and path.endswith("/job") and "mode=apply" not in parsed.query:
+        return parsed._replace(query="mode=apply&apply=yes", fragment="").geturl()  # its email step
     if host.endswith(".myworkdayjobs.com") and "/job/" in path and "/apply" not in path:
         return parsed._replace(path=path + WORKDAY_APPLY, query="", fragment="").geturl()
     return url
@@ -257,7 +274,7 @@ def board(days: int | None) -> dict:
     applied = applied_check()
     queued = store.queue_statuses()
     for job in jobs:
-        job["apply_url"] = apply_url(job["url"])
+        job["apply_url"] = apply_url(job.get("ats_url") or job["url"])
         job["applied"] = applied(job)
         job["queue"] = queued.get(job["id"])
     return {"jobs": jobs, "progress": progress(), "counts": store.counts()}
@@ -268,4 +285,9 @@ def applied_check():
     applications = tracker.load()
     keys = {a["key"] for a in applications}
     urls = {a.get("board_url") for a in applications} | {a.get("url") for a in applications}
-    return lambda job: job["url"] in urls or tracker.job_key(job["url"]) in keys or bool(job.get("legacy_applied"))
+
+    def applied(job: dict) -> bool:
+        links = [job["url"], job.get("ats_url") or ""]  # its listing, and its own form when one was found
+        return any(link and (link in urls or tracker.job_key(link) in keys) for link in links) or bool(job.get("legacy_applied"))
+
+    return applied

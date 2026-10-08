@@ -129,11 +129,16 @@ def quote(text: str, match: re.Match) -> str:
 def form_warnings(fields: list[Field]) -> list[str]:
     """Warnings from the form's own questions: one that asks about U.S. citizenship
     means the job is probably limited to citizens (user, 2026-10-05: don't apply)."""
+    return citizenship_warning([f.label for f in fields])
+
+
+def citizenship_warning(labels: list[str]) -> list[str]:
+    """form_warnings for question labels read straight from a page."""
     from jobautomate.answers import US_CITIZEN
 
     if "united states" in load_profile()["work_authorization"]["citizenship"].lower():
         return []
-    asked = next((f.label for f in fields if re.search(US_CITIZEN, f.label.lower())), None)
+    asked = next((label for label in labels if re.search(US_CITIZEN, label.lower())), None)
     return [f"This application asks about U.S. citizenship (\"{asked[:90]}\"), so it is probably limited to citizens."] if asked else []
 
 

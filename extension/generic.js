@@ -5,8 +5,21 @@
 // description are read from the page too. iCIMS shows its form inside an iframe
 // (?in_iframe=1), where this script also runs.
 
-const GN_HOSTS = /(^|\.)jobs\.gusto\.com$|(^|\.)wellfound\.com$|\.icims\.com$/;
+const GN_HOSTS = /(^|\.)jobs\.gusto\.com$|(^|\.)wellfound\.com$|\.icims\.com$|\.oraclecloud\.com$|\.successfactors\.(com|eu)$|\.sapsf\.(com|eu|cn)$|\.ns2cloud\.com$/;
 const GN_ICIMS = /\.icims\.com$/.test(location.hostname);
+// Oracle fills in answers saved from earlier applications to the same company, and
+// from unfinished ones. Its questions are answered again, so an old answer is never sent.
+const GN_REANSWER = /\.oraclecloud\.com$/.test(location.hostname);
+// Its address lists are answered again too: its resume import can put in the wrong
+// city. Each one only depends on the one before (City lists that state's cities, ZIP
+// that city's codes), so they go in this order, and the street goes last, typed: its
+// suggestions are other cities' streets of the same name.
+const GN_ADDRESS_ORDER = [/^country/i, /^state|province/i, /^city/i, /^(zip|postal)/i, /^county/i, /^address line 1/i];
+const gnAddressRank = (field) => {
+  const rank = GN_ADDRESS_ORDER.findIndex((re) => re.test(clean(field.label)));
+  return rank < 0 ? 0 : rank - GN_ADDRESS_ORDER.length;
+};
+const gnReanswer = (field) => GN_REANSWER && field.filled && (field.kind === "select" || (field.kind === "listbox" && gnAddressRank(field) < 0));
 const GN_SKIP_TYPES = /^(hidden|submit|button|reset|password|search|image)$/;
 // Page furniture that is never part of an application.
 const GN_OUTSIDE = 'header, footer, nav, [role="search"], [role="banner"], [role="navigation"], #onetrust-consent-sdk, [id*="cookie" i], [class*="cookie" i], #job-autofill-panel';
@@ -72,8 +85,11 @@ function gnCommonAncestor(elements) {
   return node;
 }
 
-// Text of one option: climb from the input while the box holds no other option.
+// Text of one option: its own label (Oracle hides the input and labels it apart),
+// else climb from the input while the box holds no other option.
 function gnOptionText(input, group) {
+  const own = [...(input.labels || [])].map((l) => clean(l.innerText)).find(Boolean);
+  if (own) return own;
   let box = input;
   while (box.parentElement && group.filter((e) => box.parentElement.contains(e)).length === 1) box = box.parentElement;
   return clean(box.innerText || input.value);
@@ -116,6 +132,11 @@ function gnFields(form) {
       continue;
     }
     if (GN_SKIP_TYPES.test(type) || element.disabled || element.readOnly && type !== "file") continue;
+    // Honeypots: boxes people never see, there to catch bots. Never filled.
+    if (/honey.?pot/i.test(`${element.name} ${element.id} ${element.className}`)) continue;
+    // Oracle's "Import your profile" box re-reads the resume over the whole form; it
+    // is used (or not) by atsOracleImport, never as an upload box.
+    if (type === "file" && /profile-import/.test(String(element.className))) continue;
     // Boxes hidden from people (aria-hidden) are mirrors the site fills itself, such as
     // Workable's city and postcode behind its location search. File inputs are often
     // hidden behind an upload button, so those still count.
@@ -172,7 +193,29 @@ function gnFields(form) {
     else if (type === "date" || type === "month") kind = type;
     fields.push({ key, label, kind, options, required: gnRequired(element, label) || /\*/.test(gnCommonAncestor(group)?.innerText.split("\n")[0] || ""), group, filled });
   }
+  // Choices drawn as buttons (role="radio" buttons in a radiogroup, such as Oracle's
+  // pills for Title and Degree).
+  // SuccessFactors draws its radios this way too, naming the question and each option
+  // through aria-labelledby.
+  for (const box of form.querySelectorAll('[role="radiogroup"]')) {
+    const group = [...box.querySelectorAll('[role="radio"]:not(input)')].filter((b) => b.offsetParent !== null);
+    if (!group.length || box.closest(GN_OUTSIDE)) continue;
+    const row = box.closest(".input-row, fieldset, .form-group, li, .RCMFormField") || box.parentElement;
+    const rowLabel = row && row.querySelector("label, legend");
+    const raw = box.getAttribute("aria-label") || gnAriaText(box) || (rowLabel && rowLabel.innerText) || "";
+    const label = gnCleanLabel(raw);
+    if (!label) continue;
+    const key = `pills-${label}`;
+    const required = /\*/.test(raw) || Boolean(row && row.querySelector('[class*="required"]')) || box.getAttribute("aria-required") === "true";
+    fields.push({ key, label, kind: "pills", options: group.map((b) => gnAriaText(b) || clean(b.innerText)), required, group, filled: group.some((b) => b.getAttribute("aria-checked") === "true") });
+  }
   return fields;
+}
+
+// Text an element is named by through aria-labelledby, if any.
+function gnAriaText(element) {
+  const ids = (element.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean);
+  return clean(ids.map((id) => document.getElementById(id)?.innerText || "").join(" "));
 }
 
 // ---- custom dropdowns ----
@@ -240,10 +283,24 @@ async function gnSearchList(element, text) {
   setNativeValue(element, text);
   for (const type of ["keydown", "keyup"]) element.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key: text.slice(-1), keyCode: text.toUpperCase().charCodeAt(text.length - 1) }));
   await sleep(300);
-  return (await waitFor(() => {
+  // The list has caught up once an option starts with the text; lists that keep
+  // the term mid-option ("Bachelor of Science (BS)") are taken a little later.
+  const want = text.toLowerCase().slice(0, 4);
+  const starts = () => {
     const options = gnOptionsFor(element);
-    return options.some((o) => clean(o.innerText).toLowerCase().includes(text.toLowerCase().slice(0, 4))) && options;
-  }, 2500)) || [];
+    return options.some((o) => clean(o.innerText).toLowerCase().startsWith(want)) && options;
+  };
+  const shown = () => {
+    const options = gnOptionsFor(element);
+    return options.some((o) => clean(o.innerText).toLowerCase().includes(want)) && options;
+  };
+  const found = (await waitFor(starts, 2500)) || shown();
+  if (found) return found;
+  // Some lists (Oracle's ZIP code) only search on real typing.
+  setNativeValue(element, "");
+  element.focus();
+  document.execCommand("insertText", false, text);
+  return (await waitFor(starts, 4000)) || shown() || [];
 }
 
 // Some lists show states as codes ("CA").
@@ -352,13 +409,41 @@ async function gnFillText(element, value) {
 }
 
 async function gnFill(field, value, files) {
+  // Pages that redraw a section (Oracle's address, after Country is set) replace its
+  // boxes; the new box with the same name is used.
+  if (!field.group[0].isConnected) {
+    // Same name, else (ids made up afresh on each redraw, as on SuccessFactors) same question.
+    const fresh = await waitFor(() => {
+      const now = gnFields(gnForm()).filter((f) => f.group[0].isConnected && f.kind === field.kind);
+      return now.find((f) => f.key === field.key) || now.find((f) => f.label === field.label);
+    }, 4000);
+    if (!fresh) throw new Error("the box went away");
+    field.group = fresh.group;
+  }
   const [element] = field.group;
+  if (field.kind === "listbox" && GN_REANSWER && /^address line 1/i.test(clean(field.label))) {
+    await gnFillText(element, String(value));
+    element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab", keyCode: 9 }));
+    await sleep(300);
+    return;
+  }
   if (field.kind === "listbox") {
     const options = await gnOpenListbox(element);
-    const pick = (list) => matchText(list, String(value), (o) => o.innerText) || (GN_STATE_CODES[String(value).toLowerCase()] && matchText(list, GN_STATE_CODES[String(value).toLowerCase()], (o) => o.innerText));
-    let match = pick(options);
+    const code = GN_STATE_CODES[String(value).toLowerCase()];
+    const pick = (list) => matchText(list, String(value), (o) => o.innerText) || (code && matchText(list, code, (o) => o.innerText));
+    // An option that is or starts with the answer; "contains" alone is weaker
+    // (Oracle's city list reads "Acton, Los Angeles, CA" for Acton).
+    const strict = (list) => {
+      const want = clean(String(value)).toLowerCase();
+      return list.find((o) => clean(o.innerText).toLowerCase() === want) || list.find((o) => clean(o.innerText).toLowerCase().startsWith(want)) || (code && list.find((o) => clean(o.innerText) === code));
+    };
+    let match = strict(options);
     // Long lists (Oracle, SuccessFactors) only show part of their options until searched.
-    if (!match && element.tagName === "INPUT") match = pick(await gnSearchList(element, String(value).slice(0, 30)));
+    if (!match && element.tagName === "INPUT") {
+      const found = await gnSearchList(element, String(value).slice(0, 30));
+      match = strict(found) || pick(found);
+    }
+    if (!match) match = pick(options);
     if (!match) {
       await gnCloseListbox(element);
       throw new Error(`no option "${value}"`);
@@ -380,6 +465,13 @@ async function gnFill(field, value, files) {
     if (!match.checked) gnClickChoice(match);
   };
   if (field.kind === "select") return pickIn(value);
+  if (field.kind === "pills") {
+    const match = matchText(field.group, String(value), (b) => gnAriaText(b) || b.innerText);
+    if (!match) throw new Error(`no option "${value}"`);
+    if (match.getAttribute("aria-checked") !== "true") realClick(match);
+    await waitFor(() => match.getAttribute("aria-checked") === "true", 1000);
+    return;
+  }
   if (field.kind === "checkboxes") return (Array.isArray(value) ? value : [value]).forEach(pickIn);
   if (field.kind === "checkbox") {
     const want = /^(yes|true)$/i.test(String(value));
@@ -428,13 +520,15 @@ function gnCheck(field, value, files) {
     return shown.toLowerCase().startsWith(String(value).toLowerCase()) ? null : `page shows "${shown}"`;
   }
   if (field.kind === "checkbox") return element.checked === /^(yes|true)$/i.test(String(value)) ? null : "checkbox not set";
+  if (field.kind === "pills") return field.group.some((b) => b.getAttribute("aria-checked") === "true") ? null : "nothing selected";
   return field.group.some((e) => e.checked) ? null : "nothing selected";
 }
 
 const genericSite = {
-  matches: () => gnFields(gnForm()).length > 1,
+  matches: () => gnFields(gnForm()).length > 1 || (typeof atsSfForm === "function" && atsSfForm()),
 
   async run() {
+    if (typeof atsSfExpand === "function") await atsSfExpand();
     const job = await gnJobInfo();
     const problems = [];
     const needYou = [];
@@ -444,21 +538,43 @@ const genericSite = {
     let warnings = [];
     const done = new Set();
     const known = GN_HOSTS.test(location.hostname);
+    // Oracle: its resume import first (it overwrites the form), then the education
+    // entries it creates, which usually lack the degree.
+    if (typeof atsOracleImport === "function" && ATS_ORACLE && document.querySelector("input[type=file][class*='profile-import']")) {
+      const first = await api("/answer", { url: pageJobUrl(), job, fields: [] });
+      if (first && first.ok) {
+        try {
+          await atsOracleImport(first.data.files);
+        } catch (error) {
+          // Filling now would be undone when the import lands, so stop here.
+          const summary = `${error.message}, so nothing else was filled. Fill this application again in a minute.`;
+          showPanel(summary, true);
+          return { summary, failed: true };
+        }
+        problems.push(...(await atsOracleFixEntries(first.data.profile || {})));
+      }
+    } else if (typeof atsOracleFixEntries === "function" && ATS_ORACLE) {
+      const first = await api("/answer", { url: pageJobUrl(), job, fields: [] });
+      if (first && first.ok) problems.push(...(await atsOracleFixEntries(first.data.profile || {})));
+    }
     // Some answers reveal more boxes (iCIMS shows a privacy consent after the
     // California resident box), so look again once after the first pass.
+    const given = new Map(); // question -> the answer that went in, for the last check
+    let lastFiles = {};
     for (let pass = 0; pass < 2; pass++) {
       const all = gnFields(gnForm()).filter((f) => !done.has(f.key));
       all.forEach((f) => done.add(f.key));
       // Fields you (or the site's resume reader) already filled are left as they are.
-      kept += all.filter((f) => f.filled).length;
-      const fields = all.filter((f) => !f.filled);
+      kept += all.filter((f) => f.filled && !gnReanswer(f)).length;
+      const fields = all.filter((f) => !f.filled || gnReanswer(f));
+      if (GN_REANSWER) fields.sort((a, b) => gnAddressRank(a) - gnAddressRank(b));
       if (!fields.length) break;
       await gnReadListOptions(fields);
       const reply = await api("/answer", { url: pageJobUrl(), job, fields: fields.map(({ group, ...f }) => f) });
       if (!reply || !reply.ok) {
         const summary = `The local server could not prepare this job: ${reply ? reply.data.detail || reply.status : "no reply"}`;
         showPanel(summary, true);
-        return { summary };
+        return { summary, failed: true };
       }
       const answers = Object.fromEntries(reply.data.fields.map((f) => [f.id, f.answer]));
       const { files } = reply.data;
@@ -484,11 +600,20 @@ const genericSite = {
           if (digits.length === 10) answer.value = `+1${digits}`;
         }
         if (isEmpty(answer.value)) {
+          if (field.filled) {
+            kept++; // a saved answer with nothing better to put in its place
+            continue;
+          }
           if (field.required || answer.source === "ask") needYou.push(`${field.label.slice(0, 70)}${answer.note ? ` (${answer.note})` : ""}`);
           continue;
         }
+        // A saved answer that already matches is left as it is.
+        if (field.filled && !gnCheck(field, answer.value, files)) {
+          kept++;
+          continue;
+        }
         try {
-          await gnFill(field, answer.value, files);
+          answer.value = await fillWithRetries((v) => gnFill(field, v, files), field, answer.value, field.options.length ? async () => field.options : null);
           await sleep(60);
           let issue = gnCheck(field, answer.value, files);
           // Number-only salary boxes throw away "Flexible"; use the salary number instead.
@@ -501,6 +626,7 @@ const genericSite = {
           }
           if (issue) throw new Error(issue);
           filled++;
+          given.set(field.label, { kind: field.kind, value: answer.value });
           if (answer.source === "llm") review.push(`${field.label.slice(0, 70)}: "${answer.value}"`);
         } catch (error) {
           // A dropdown whose options depend on an earlier answer (State after Country)
@@ -509,7 +635,22 @@ const genericSite = {
           else problems.push(`${field.label.slice(0, 70)}: ${error.message}`);
         }
       }
+      lastFiles = files;
       await sleep(250);
+    }
+    // Some pages redraw a section after a later answer and lose what went in before
+    // (SuccessFactors' address after Country). Required boxes that are empty again get
+    // their answer once more.
+    for (const field of gnFields(gnForm()).filter((f) => f.required && !f.filled && given.has(f.label) && given.get(f.label).kind === f.kind)) {
+      const { value } = given.get(field.label);
+      try {
+        await gnFill(field, value, lastFiles);
+        await sleep(60);
+        const issue = gnCheck(field, value, lastFiles);
+        if (issue) throw new Error(issue);
+      } catch (error) {
+        problems.push(`${field.label.slice(0, 70)}: ${error.message}`);
+      }
     }
     api("/log", { url: pageJobUrl(), company: job.company, title: job.title, event: "filled", problems });
     watchSubmit(job.company, job.title);
@@ -522,6 +663,7 @@ const genericSite = {
     if (!problems.length && !needYou.length) lines.push("", "Everything matched. Please look it over and press Submit yourself.");
     const summary = lines.join("\n");
     showPanel(summary, problems.length || needYou.length || warnings.length);
-    return { summary };
+    // The same report the other sites give, so the queue can judge the fill.
+    return { summary, filled, kept, problems, needYou, review, warnings };
   },
 };

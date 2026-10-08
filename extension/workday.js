@@ -211,18 +211,27 @@ function wdClearSearch(input) {
 // the results, and pick the first of the names they show, matched exactly (see
 // nameKey). With no search words, each name is searched in turn. A nearby but
 // different name is never picked; that is reported instead.
-async function wdSearchPick(box, search, names) {
-  if (wdPromptSelected(box).some((s) => names.some((n) => nameKey(n) === nameKey(s)))) return;
+// Names that differ only in singular and plural ("Computer sciences") count as the same.
+const wdSameName = (a, b) => {
+  const stem = (text) => nameKey(text).replace(/\b(\w{3,}?)s\b/g, "$1");
+  return stem(a) === stem(b);
+};
+
+// `loose` (majors only): when none of the names is listed, the option that means the
+// same thing is picked from what a broader search shows. Schools never use it: a
+// nearby but different school is never picked.
+async function wdSearchPick(box, search, names, { loose = false, label = "Field of study" } = {}) {
+  if (wdPromptSelected(box).some((s) => names.some((n) => wdSameName(n, s)))) return;
   const input = box.querySelector("input");
   if (!input) throw new Error("no search box");
   const find = () => {
     for (const name of names) {
-      const hit = wdPromptOptions().find((o) => nameKey(o.innerText) === nameKey(name));
+      const hit = wdPromptOptions().find((o) => wdSameName(o.innerText, name));
       if (hit) return hit;
     }
     return null;
   };
-  const wanted = () => wdPromptSelected(box).some((s) => names.some((n) => nameKey(n) === nameKey(s)));
+  const wanted = () => wdPromptSelected(box).some((s) => names.some((n) => wdSameName(n, s)));
   for (const term of search ? [search] : names) {
     const before = wdPromptSelected(box);
     const option = await wdSearch(input, term, find, () => wdPromptSelected(box).length !== before.length);
@@ -237,6 +246,30 @@ async function wdSearchPick(box, search, names) {
     // Workday picked a single, different result by itself: take it out again.
     for (const other of wdPromptSelected(box).filter((s) => !before.includes(s))) {
       if (!(await wdUnpick(box, other))) throw new Error(`Workday picked "${other}" by itself, which isn't one of "${names.join('", "')}"`);
+    }
+  }
+  if (loose) {
+    // A broader search ("Computer"), then the option that means the same major.
+    for (const term of [...new Set(names.map((n) => n.split(/\s+/)[0]))]) {
+      const before = wdPromptSelected(box);
+      await wdSearch(input, term, () => null, () => wdPromptSelected(box).length !== before.length);
+      const options = wdPromptOptions().map((o) => clean(o.innerText));
+      const picked = wdPromptSelected(box).filter((s) => !before.includes(s));
+      if (picked.length) {
+        // Workday picked the only result by itself; keep it only if it means the same.
+        const reply = await api("/choose", { label, wanted: names[0], options: picked });
+        if (reply && reply.ok && reply.data.option) return wdLeave(input);
+        for (const other of picked) await wdUnpick(box, other);
+        continue;
+      }
+      if (!options.length) continue;
+      const reply = await api("/choose", { label, wanted: names[0], options });
+      const choice = reply && reply.ok && reply.data.option && wdPromptOptions().find((o) => clean(o.innerText) === reply.data.option);
+      if (choice) {
+        realClick(choice);
+        await waitFor(() => wdPromptSelected(box).length > before.length, 1500);
+        return wdLeave(input);
+      }
     }
   }
   const seen = wdPromptOptions().slice(0, 5).map((o) => clean(o.innerText));
@@ -298,6 +331,18 @@ function wdSetCheckbox(box, checked) {
   if (input && input.checked !== checked) input.click();
 }
 
+// A group of checkboxes used as one choice ("Please check one of the boxes below"):
+// ticks the one whose label matches, and unticks the others.
+function wdTickOne(box, wanted) {
+  const choices = [...box.querySelectorAll("input[type=checkbox]")].map((input) => ({
+    input,
+    label: clean((box.querySelector(`label[for="${CSS.escape(input.id)}"]`) || input.closest("label") || input.parentElement).innerText),
+  }));
+  const choice = matchText(choices, String(wanted), (c) => c.label);
+  if (!choice) throw new Error(`no option "${wanted}" (saw: ${choices.map((c) => c.label.slice(0, 40)).join(" / ")})`);
+  for (const c of choices) if (c.input.checked !== (c === choice)) c.input.click();
+}
+
 const WD_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 // Month/year dates must be chosen in Workday's own picker, or Workday keeps the
@@ -332,9 +377,21 @@ async function wdSetDate(box, value) {
     await wdPickMonth(box, Number(year), Number(month));
     return;
   }
-  if (part("Month") && month) fillText(part("Month"), String(Number(month)));
-  if (part("Day") && day) fillText(part("Day"), String(Number(day)));
-  if (part("Year")) fillText(part("Year"), year);
+  // Typed, the way a keyboard does: a value set from script doesn't register here.
+  const type = (input, text) => {
+    input.focus();
+    input.select();
+    if (!document.execCommand("insertText", false, text) || input.value.replace(/^0/, "") !== text.replace(/^0/, "")) setNativeValue(input, text);
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  if (part("Month") && month) type(part("Month"), String(Number(month)).padStart(2, "0"));
+  if (part("Day") && day) type(part("Day"), String(Number(day)).padStart(2, "0"));
+  if (part("Year")) type(part("Year"), year);
+  const last = part("Year") || part("Day") || part("Month");
+  if (last) {
+    last.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    last.blur();
+  }
 }
 
 async function wdFill(box, kind, value) {
@@ -342,6 +399,7 @@ async function wdFill(box, kind, value) {
   else if (kind === "select") await wdChoose(box, value);
   else if (kind === "prompt") await wdPrompt(box, value);
   else if (kind === "radio") wdChooseRadio(box, value);
+  else if (kind === "checkbox" && box.querySelectorAll("input[type=checkbox]").length > 1) wdTickOne(box, value);
   else if (kind === "checkbox") wdSetCheckbox(box, /^(yes|true)$/i.test(String(value)));
   else if (kind === "date") await wdSetDate(box, value);
   else throw new Error(`don't know how to fill a "${kind}" field`);
@@ -372,7 +430,8 @@ function wdPanels(section) {
   return [...section.querySelectorAll('[role=group][aria-labelledby$="-panel"]')].filter((p) => p.getAttribute("aria-labelledby").startsWith(`${prefix}-`));
 }
 
-async function wdSyncPanels(name, count) {
+// Removes entries beyond `count` (left from an earlier try).
+async function wdTrimPanels(name, count) {
   const section = wdSection(name);
   if (!section) throw new Error("the section is no longer on the page (Workday may have reloaded it)");
   for (let guard = 0; guard < 12 && wdPanels(section).length > count; guard++) {
@@ -382,24 +441,49 @@ async function wdSyncPanels(name, count) {
     realClick(remove);
     await waitFor(() => wdPanels(section).length < panels.length, 3000);
   }
-  for (let guard = 0; guard < 12 && wdPanels(section).length < count; guard++) {
+}
+
+// The entry at `index`, adding entries until it exists. Entries are added one at a
+// time, after the one before is filled, the way a person does. When the Add button
+// doesn't respond, other ways of pressing it are tried before giving up.
+async function wdPanelAt(name, index) {
+  const section = wdSection(name);
+  if (!section) throw new Error("the section is no longer on the page (Workday may have reloaded it)");
+  const presses = [
+    (button) => button.click(),
+    (button) => realClick(button),
+    (button) => {
+      button.scrollIntoView({ block: "center" });
+      button.focus();
+      for (const type of ["keydown", "keyup"]) button.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key: "Enter", code: "Enter", keyCode: 13 }));
+      button.click();
+    },
+  ];
+  for (let guard = 0; guard < 12 && wdPanels(section).length <= index; guard++) {
     const before = wdPanels(section).length;
-    // "Add" for the first entry, "Add Another" after that.
-    const add = [...section.querySelectorAll('[data-automation-id="add-button"]')].filter(wdVisible).pop();
-    if (!add) throw new Error("no Add button");
-    add.click();
-    if (!(await waitFor(() => wdPanels(section).length > before, 4000))) throw new Error("a new entry did not appear after Add");
+    let added = false;
+    for (const press of presses) {
+      // "Add" for the first entry, "Add Another" after that.
+      const add = [...section.querySelectorAll('[data-automation-id="add-button"]')].filter(wdVisible).pop();
+      if (!add) throw new Error("no Add button");
+      press(add);
+      if (await waitFor(() => wdPanels(section).length > before, 5000)) {
+        added = true;
+        break;
+      }
+    }
+    if (!added) throw new Error(`entry ${index + 1} did not appear after pressing Add three different ways`);
     await sleep(300);
   }
-  return wdPanels(section);
+  return wdPanels(section)[index];
 }
 
 const inPanel = (panel, name) => wdId(`formField-${name}`, panel);
 
 async function wdFillExperience(jobs) {
-  const panels = await wdSyncPanels("work", jobs.length);
+  await wdTrimPanels("work", jobs.length);
   for (const [i, job] of jobs.entries()) {
-    const panel = panels[i];
+    const panel = await wdPanelAt("work", i);
     wdSetText(inPanel(panel, "jobTitle"), job.title);
     wdSetText(inPanel(panel, "companyName"), job.company);
     if (inPanel(panel, "location")) wdSetText(inPanel(panel, "location"), job.location);
@@ -458,16 +542,27 @@ async function wdChooseDegree(box, school) {
   const level = /bachelor/i.test(school.degree_level) ? "bachelor" : /master/i.test(school.degree_level) ? "master" : null;
   const names = [school.degree_level, school.degree, ...(WD_DEGREE_NAMES[level] || [])].filter(Boolean);
   const options = await wdSelectOptions(box);
-  const pick = names.map((n) => options.find((o) => nameKey(o) === nameKey(n))).find(Boolean);
+  let pick = names.map((n) => options.find((o) => nameKey(o) === nameKey(n))).find(Boolean);
+  if (!pick) {
+    // Lists with unusual names ("Masters / Post Graduate Degree"): the option that means the same degree.
+    const reply = await api("/choose", { label: "Highest degree for this school", wanted: `${school.degree_level} (${school.degree})`, options });
+    pick = reply && reply.ok ? reply.data.option : null;
+  }
   if (!pick) throw new Error(`no option for "${school.degree_level}" (saw: ${options.slice(0, 10).join(" / ")})`);
   await wdChoose(box, pick);
 }
 
 async function wdFillEducation(schools) {
-  const panels = await wdSyncPanels("education", schools.length);
+  await wdTrimPanels("education", schools.length);
   const problems = [];
   for (const [i, school] of schools.entries()) {
-    const panel = panels[i];
+    let panel;
+    try {
+      panel = await wdPanelAt("education", i);
+    } catch (error) {
+      problems.push(`${school.school}: ${error.message}`);
+      break; // the schools already filled stay filled
+    }
     // One field that fails doesn't stop the others.
     const step = async (name, fill) => {
       try {
@@ -480,7 +575,7 @@ async function wdFillEducation(schools) {
     if (schoolBox && wdKind(schoolBox) === "prompt") await step("school", () => wdSearchPick(schoolBox, school.search || school.school, school.names || [school.school]));
     else if (schoolBox) await step("school", () => wdFill(schoolBox, wdKind(schoolBox), school.school));
     if (inPanel(panel, "degree")) await step("degree", () => wdChooseDegree(inPanel(panel, "degree"), school));
-    if (inPanel(panel, "fieldOfStudy")) await step("field of study", () => wdSearchPick(inPanel(panel, "fieldOfStudy"), null, school.majors || [school.discipline]));
+    if (inPanel(panel, "fieldOfStudy")) await step("field of study", () => wdSearchPick(inPanel(panel, "fieldOfStudy"), null, school.majors || [school.discipline], { loose: true }));
     if (inPanel(panel, "gradeAverage")) await step("GPA", () => wdSetText(inPanel(panel, "gradeAverage"), String(school.gpa).split("/")[0].trim()));
     if (inPanel(panel, "firstYearAttended")) await step("start year", () => wdSetDate(inPanel(panel, "firstYearAttended"), String(school.start).slice(0, 4)));
     if (inPanel(panel, "lastYearAttended")) await step("end year", () => wdSetDate(inPanel(panel, "lastYearAttended"), String(school.end).slice(0, 4)));
@@ -489,9 +584,9 @@ async function wdFillEducation(schools) {
 }
 
 async function wdFillLanguages(languages) {
-  const panels = await wdSyncPanels("languages", languages.length);
+  await wdTrimPanels("languages", languages.length);
   for (const [i, language] of languages.entries()) {
-    const panel = panels[i];
+    const panel = await wdPanelAt("languages", i);
     if (inPanel(panel, "language")) await wdChoose(inPanel(panel, "language"), language.name);
     if (inPanel(panel, "native")) wdSetCheckbox(inPanel(panel, "native"), Boolean(language.fluent));
     // Reading / Speaking / Writing levels: pick the most fluent option.
@@ -505,8 +600,11 @@ async function wdFillLanguages(languages) {
 
 async function wdFillWebsites(links) {
   const urls = [links.linkedin, links.github, links.website].filter(Boolean);
-  const panels = await wdSyncPanels("websites", urls.length);
-  urls.forEach((url, i) => inPanel(panels[i], "url") && wdSetText(inPanel(panels[i], "url"), url));
+  await wdTrimPanels("websites", urls.length);
+  for (const [i, url] of urls.entries()) {
+    const panel = await wdPanelAt("websites", i);
+    if (inPanel(panel, "url")) wdSetText(inPanel(panel, "url"), url);
+  }
 }
 
 async function wdUploadResume(root, files) {
@@ -542,7 +640,9 @@ function wdKnownAnswer(box, profile) {
     "formField-email": profile.contact.email,
     "formField-linkedInAccount": profile.links.linkedin,
     "formField-name": `${profile.name.first} ${profile.name.last}`,
-    "formField-dateSignedOn": new Date().toISOString().slice(0, 10),
+    "formField-dateSignedOn": new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10), // today, local
+    // Disability self-identification (Form CC-305): from the profile.
+    "formField-disabilityStatus": profile.demographics && profile.demographics.disability === false ? "No, I do not have a disability" : profile.demographics && profile.demographics.disability ? "Yes, I have a disability" : "I do not want to answer",
   };
   if (id in known) return known[id];
   if (wdKind(box) === "checkbox" && /consent|agree|acknowledge|certify|terms/i.test(wdLabel(box))) return "Yes";
@@ -563,7 +663,12 @@ async function wdAskAndFill(boxes, files, profile, problems, needYou, review) {
       fields.push({ key: wdKey(box), label: wdLabel(box), kind, known, required: wdRequired(box), box });
       continue;
     }
-    const options = kind === "select" ? await wdSelectOptions(box) : kind === "radio" ? [...box.querySelectorAll("label[for]")].map((l) => clean(l.innerText)) : kind === "checkbox" ? ["Yes", "No"] : [];
+    const group = kind === "checkbox" && box.querySelectorAll("input[type=checkbox]").length > 1;
+    const options =
+      kind === "select" ? await wdSelectOptions(box)
+      : kind === "radio" || group ? [...box.querySelectorAll("label[for]")].map((l) => clean(l.innerText)).filter((t) => t && t !== wdLabel(box))
+      : kind === "checkbox" ? ["Yes", "No"]
+      : [];
     fields.push({ key: wdKey(box), label: wdLabel(box), kind: kind === "radio" || kind === "select" ? "select" : kind, options, required: wdRequired(box), box });
   }
 
@@ -587,7 +692,7 @@ async function wdAskAndFill(boxes, files, profile, problems, needYou, review) {
       // A major box is searched for each of the school's majors in turn.
       const major = kind === "prompt" && /^education-\d+--fieldOfStudy/i.test(field.key) && (profile.education || []).find((s) => s.discipline === value);
       if (school) await wdSearchPick(field.box, school.search || school.school, school.names || [school.school]);
-      else if (major) await wdSearchPick(field.box, null, major.majors || [major.discipline]);
+      else if (major) await wdSearchPick(field.box, null, major.majors || [major.discipline], { loose: true });
       else await wdFill(field.box, kind, kind === "prompt" && /how did you hear/i.test(field.label) ? [value, ...profile.standing_answers.job_source, "Other"] : value);
       if (answer.source === "llm") review.push(`${field.label.slice(0, 70)}: "${value}"`);
     } catch (error) {
@@ -692,13 +797,29 @@ async function wdWaitForForm() {
   }
 }
 
+// Presses Save and Continue, trying other ways when a press doesn't take: some steps
+// lay an invisible click_filter box over the button, which only a click on that box
+// (or the Enter key) gets through.
 async function wdNext(step) {
-  const next = wdId("pageFooterNextButton");
-  if (!next) throw new Error("no Save and Continue button");
-  next.click();
-  const moved = await waitFor(() => (wdStep() && wdStep() !== step) || wdErrors().length || wdId("errorBanner"), 20000);
+  const presses = [
+    (button) => button.click(),
+    (button) => realClick((button.parentElement && wdId("click_filter", button.parentElement)) || button),
+    (button) => {
+      button.focus();
+      for (const type of ["keydown", "keypress", "keyup"]) button.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13 }));
+    },
+  ];
+  const moved = () => wdStep() && wdStep() !== step;
+  for (const [i, press] of presses.entries()) {
+    const next = wdId("pageFooterNextButton");
+    if (!next) throw new Error("no Save and Continue button");
+    press(next);
+    // Errors mean the press worked and Workday found a problem; don't press again.
+    await waitFor(() => moved() || wdErrors().length || wdId("errorBanner"), i === presses.length - 1 ? 20000 : 10000);
+    if (moved() || wdErrors().length || wdId("errorBanner")) break;
+  }
   await sleep(1500);
-  return Boolean(moved) && wdStep() !== step;
+  return Boolean(moved());
 }
 
 // ---- sign in / create account ----
@@ -835,47 +956,59 @@ const workdaySite = {
     WD_HOSTS.test(location.hostname) &&
     Boolean(wdId("progressBarActiveStep") || wdLoginForm() || wdVisible(wdId("SignInWithEmailButton")) || wdErrorPage()),
 
+  // Returns the same report as the other sites (filled, problems, needYou, review,
+  // warnings), so the auto apply queue can tell a clean fill from one that needs you.
+  // reachedReview is true only on Workday's last step, where Submit is.
   async run() {
+    const report = (summary, extra = {}) => ({ summary, filled: 0, problems: [], needYou: [], review: [], warnings: [], ...extra });
+    const stop = (summary, extra = {}) => {
+      showPanel(summary, true);
+      return report(summary, { problems: [summary.split("\n")[0]], ...extra });
+    };
     try {
       if (!wdErrorPage()) await wdSignIn();
     } catch (error) {
-      showPanel(error.message, true);
-      return { summary: error.message };
+      return stop(error.message);
     }
     if (wdId("progressBarActiveStep")) await waitFor(() => wdErrorPage() || wdId("pageFooterNextButton"), 15000);
     if (wdErrorPage()) {
-      const summary = wdReloadAndContinue()
-        ? "Workday showed an error page after signing in, so I reloaded it. Filling carries on by itself once the page loads."
-        : "Workday still shows an error page after a reload. Please refresh the page yourself, then click Fill this application again.";
-      showPanel(summary, true);
-      return { summary };
+      if (wdReloadAndContinue()) {
+        const summary = "Workday showed an error page after signing in, so I reloaded it. Filling carries on by itself once the page loads.";
+        showPanel(summary, true);
+        return report(summary, { reloading: true });
+      }
+      return stop("Workday still shows an error page after a reload. Please refresh the page yourself, then click Fill this application again.");
     }
     if (!wdId("progressBarActiveStep")) {
-      const summary = /already applied/i.test(document.body.innerText)
-        ? "You're signed in. Workday says you have already applied for this job."
-        : "You're signed in. Open the job and click Apply, then click Fill this application again.";
-      showPanel(summary, false);
-      return { summary };
+      if (/already applied/i.test(document.body.innerText)) {
+        const summary = "You're signed in. Workday says you have already applied for this job.";
+        showPanel(summary, false);
+        return report(summary, { alreadyApplied: true, problems: [summary] });
+      }
+      return stop("You're signed in. Open the job and click Apply, then click Fill this application again.");
     }
     const base = await api("/answer", { url: location.href, fields: [] });
-    if (!base || !base.ok) {
-      const summary = `The local server could not prepare this job: ${base ? base.data.detail || base.status : "no reply"}`;
-      showPanel(summary, true);
-      return { summary };
-    }
-    const { files, profile } = base.data;
+    if (!base || !base.ok) return stop(`The local server could not prepare this job: ${base ? base.data.detail || base.status : "no reply"}`);
+    const { files, profile, company, title } = base.data;
+    const warnings = base.data.warnings || [];
     // Watch from the start: if filling stops early, you may still submit by hand later.
-    watchSubmit(base.data.company, base.data.title);
+    watchSubmit(company, title);
     const done = [];
     const review = [];
     for (let guard = 0; guard < 10; guard++) {
       const step = wdStep();
       if (/review/i.test(step)) {
-        const summary = [`Reached the Review step after: ${done.join(", ") || "nothing"}.`, ...(review.length ? ["", "Answers the AI wrote, please read them:", ...review.map((r) => `- ${r}`)] : []), "", "Please look it over and press Submit yourself."].join("\n");
-        showPanel(summary, false);
-        api("/log", { url: location.href, company: document.title, title: clean((wdId("jobTitleHeading") || {}).innerText), event: "filled", problems: [] });
-        watchSubmit(document.title, clean((wdId("jobTitleHeading") || {}).innerText));
-        return { summary };
+        const summary = [
+          ...warnings.map((w) => `WARNING: ${w}`),
+          ...(warnings.length ? [""] : []),
+          `Reached the Review step after: ${done.join(", ") || "nothing"}.`,
+          ...(review.length ? ["", "Answers the AI wrote, please read them:", ...review.map((r) => `- ${r}`)] : []),
+          "",
+          "Please look it over and press Submit yourself.",
+        ].join("\n");
+        showPanel(summary, warnings.length > 0);
+        api("/log", { url: location.href, company: company || document.title, title: title || clean((wdId("jobTitleHeading") || {}).innerText), event: "filled", problems: [] });
+        return report(summary, { filled: done.length, review, warnings, company, title, reachedReview: true });
       }
       showPanel(`Filling "${step}"...`, false);
       await wdWaitForForm();
@@ -891,7 +1024,7 @@ const workdaySite = {
         lines.push("", "When this step is right, click Fill this application again to continue.");
         const summary = lines.join("\n");
         showPanel(summary, true);
-        return { summary };
+        return report(summary, { filled: done.length, problems: result.problems.map((p) => `${step}: ${p}`), needYou: result.needYou, review, warnings, company, title });
       }
       done.push(step);
       const moved = await wdNext(step);
@@ -899,9 +1032,9 @@ const workdaySite = {
         const errs = wdErrors();
         const summary = [`Workday did not move past "${step}".`, ...(errs.length ? ["", ...errs.map((e) => `- ${e}`)] : []), "", "Fix the fields above, then click Fill again."].join("\n");
         showPanel(summary, true);
-        return { summary };
+        return report(summary, { filled: done.length, problems: errs.length ? errs.map((e) => `${step}: ${e}`) : [`Workday did not move past "${step}"`], review, warnings, company, title });
       }
     }
-    return { summary: "Stopped after 10 steps." };
+    return stop("Stopped after 10 steps.");
   },
 };

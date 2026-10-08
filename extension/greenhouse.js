@@ -60,9 +60,32 @@ async function chooseLocation(id, place) {
   await sleep(80);
 }
 
+// Newer forms draw some choice questions as a group of checkboxes or radio buttons
+// (a fieldset with the question's id) instead of a dropdown.
+function choiceGroup(id) {
+  const element = document.getElementById(id);
+  if (!element || element.tagName !== "FIELDSET") return null;
+  return [...element.querySelectorAll("input[type=checkbox], input[type=radio]")].map((input) => ({
+    input,
+    text: clean((element.querySelector(`label[for="${CSS.escape(input.id)}"]`) || input.closest("label") || input.parentElement.parentElement).innerText),
+  }));
+}
+
+function tickChoice(id, wanted) {
+  const choices = choiceGroup(id);
+  const choice = matchText(choices, wanted, (c) => c.text);
+  if (!choice) throw new Error(`no option "${wanted}" (saw: ${choices.map((c) => c.text).join(" / ") || "nothing"})`);
+  if (!choice.input.checked) choice.input.click();
+}
+
 function shownValue(field) {
   const element = document.getElementById(field.id);
   if (field.kind === "text") return element ? element.value : null;
+  const group = choiceGroup(field.id);
+  if (group) {
+    const ticked = group.filter((c) => c.input.checked).map((c) => c.text);
+    return field.kind === "multiselect" ? ticked : ticked[0] || "";
+  }
   const control = element && element.closest(".select__control");
   if (!control) return null;
   if (field.kind === "multiselect") {
@@ -168,10 +191,10 @@ const greenhouseSite = {
       fillText(element, field.id === "phone" ? phoneDigits(value, countryOf(ctx)) : value);
     } else if (field.kind === "select") {
       const shown = shownValue(field);
-      if (!(shown && shown.startsWith(value))) await chooseOption(field.id, value);
+      if (!(shown && shown.startsWith(value))) await (choiceGroup(field.id) ? tickChoice(field.id, value) : chooseOption(field.id, value));
     } else if (field.kind === "multiselect") {
       for (const item of [value].flat()) {
-        if (!(shownValue(field) || []).includes(item)) await chooseOption(field.id, item);
+        if (!(shownValue(field) || []).includes(item)) await (choiceGroup(field.id) ? tickChoice(field.id, item) : chooseOption(field.id, item));
       }
     } else if (field.kind === "location") {
       await chooseLocation(field.id, value);
@@ -182,10 +205,29 @@ const greenhouseSite = {
     }
   },
 
+  // Every option the page offers for a choice question.
+  async optionsFor(field) {
+    const group = choiceGroup(field.id);
+    if (group) return group.map((c) => c.text);
+    const input = document.getElementById(field.id);
+    if (!input || !input.closest(".select__control")) return field.options || [];
+    await openMenu(input);
+    const options = menuOptions(field.id).map((o) => clean(o.innerText));
+    input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape", keyCode: 27 }));
+    return options.length ? options : field.options || [];
+  },
+
   async after(ctx) {
     const answeredDemographics = ctx.fields.some((f) => /^\d+$/.test(f.id) && !isEmpty(f.answer.value));
     const consent = document.querySelector('input[name="gdpr_demographic_data_consent_given"]');
     if (consent && answeredDemographics && !consent.checked) consent.click();
+    // Privacy-law consent to store and process the application (EU boards). You agreed
+    // to accept such terms (profile.yaml, standing_answers.agree_to_certifications).
+    if (ctx.agreeToTerms) {
+      for (const box of document.querySelectorAll('input[name="gdpr_processing_consent_given"], input[name="gdpr_retention_consent_given"]')) {
+        if (!box.checked) box.click();
+      }
+    }
   },
 
   check(field, value, ctx) {

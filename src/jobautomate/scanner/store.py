@@ -54,9 +54,31 @@ CREATE TABLE IF NOT EXISTS queue (
     page_url TEXT,                -- the page after Submit (the confirmation page)
     finished_at TEXT
 );
+CREATE TABLE IF NOT EXISTS careers (
+    company TEXT NOT NULL,        -- careers.company_key(name): "anduril" for "Anduril Industries"
+    system TEXT NOT NULL,         -- workday, oracle, greenhouse, lever, ashby, successfactors, icims
+    base TEXT NOT NULL,           -- where its jobs are searched: a board name or a site address
+    source TEXT NOT NULL,         -- scan (seen in a scanned job), google, linkedin
+    updated TEXT NOT NULL,
+    PRIMARY KEY (company, system, base)
+);
+CREATE TABLE IF NOT EXISTS lookups (
+    key TEXT PRIMARY KEY,         -- what was looked up, such as "google:anduril"
+    result TEXT,                  -- what was found ("" for nothing)
+    at TEXT NOT NULL
+);
 """
 
-LIST_COLUMNS = "id, url, title, company, location, source, posted, first_seen, fit, matched, deep_fit, verdict, recommend, reasons, gaps, red_flags, jd_via, hidden, opened_at, legacy_applied"
+LIST_COLUMNS = "id, url, title, company, location, source, posted, first_seen, fit, matched, deep_fit, verdict, recommend, reasons, gaps, red_flags, jd_via, hidden, opened_at, legacy_applied, ats_url, direct_url, ats_lookup"
+# Columns added after the first release; each is added once to an existing database.
+# ats_url: the job's own application form when it was found on the company's job board
+# (for jobs listed on LinkedIn and other job sites); "" when looked for and not found.
+# direct_url: the employer's own link a job site gave with the listing (Indeed and
+# ZipRecruiter through JobSpy), often behind a click-tracking redirect.
+# ats_lookup: which version of the form search last looked (see careers.LOOKUP_VERSION),
+# so jobs not found before are looked at again once the search improves.
+ADDED_COLUMNS = {"ats_url": "TEXT", "direct_url": "TEXT", "ats_lookup": "INTEGER"}
+_migrated = False
 
 
 def job_id(url: str) -> str:
@@ -70,7 +92,14 @@ def connect():
         db = sqlite3.connect(PATH)
         db.row_factory = sqlite3.Row
         try:
+            global _migrated
             db.executescript(SCHEMA)
+            if not _migrated:
+                have = {r[1] for r in db.execute("PRAGMA table_info(jobs)")}
+                for name, kind in ADDED_COLUMNS.items():
+                    if name not in have:
+                        db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {kind}")
+                _migrated = True
             yield db
             db.commit()
         finally:
@@ -95,10 +124,10 @@ def add_jobs(offers: list[dict]) -> None:
     today = datetime.now().strftime("%Y-%m-%d")
     with connect() as db:
         db.executemany(
-            """INSERT OR IGNORE INTO jobs (id, url, role_key, title, company, location, source, posted, first_seen, fit, matched, description)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT OR IGNORE INTO jobs (id, url, role_key, title, company, location, source, posted, first_seen, fit, matched, description, direct_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                (job_id(o["url"]), o["url"], o["role_key"], o["title"], o["company"], o["location"], o["source"], o.get("posted", ""), o.get("first_seen", today), o["fit"], json.dumps(o["matched"]), o.get("description") or None)
+                (job_id(o["url"]), o["url"], o["role_key"], o["title"], o["company"], o["location"], o["source"], o.get("posted", ""), o.get("first_seen", today), o["fit"], json.dumps(o["matched"]), o.get("description") or None, o.get("direct_url") or None)
                 for o in offers
             ],
         )

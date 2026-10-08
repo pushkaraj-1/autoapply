@@ -89,14 +89,47 @@ function fileFor(value, ctx) {
 
 // ---- the fill loop ----
 
+// Tries a field several ways before giving up on it: again after a short wait (slow
+// pages, lists that load late), and with the page's own option that means the same
+// answer when the answer isn't listed as written. Returns the value that went in.
+async function fillWithRetries(fill, field, value, readOptions) {
+  let lastError;
+  const tried = new Set([String(value)]);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await fill(value);
+      return value;
+    } catch (error) {
+      lastError = error;
+      if (/went away/.test(error.message)) break; // trying again finds no box either
+      if (typeof value === "string" && /no option|none of|no matching|not in the (list|suggestions)|no suggestion/i.test(error.message)) {
+        const seen = /\(saw: (.*)\)\s*$/.exec(error.message);
+        let options = readOptions ? await readOptions().catch(() => []) : [];
+        if (!options.length && seen && seen[1] !== "nothing") options = seen[1].split(" / ");
+        if (options.length) {
+          const reply = await api("/choose", { label: field.label, wanted: value, options });
+          const option = reply && reply.ok ? reply.data.option : null;
+          if (option && !tried.has(option)) {
+            tried.add(option);
+            value = option;
+            continue;
+          }
+        }
+      }
+      await sleep(500 * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
 async function runFill(adapter) {
   const reply = await api("/plan", { url: location.href });
   if (!reply || !reply.ok) {
     const detail = reply ? reply.data.detail || `server error ${reply.status}` : "no reply";
     return { summary: `The local server could not prepare this job: ${detail}`, failed: true };
   }
-  const { fields, files, company, title, warnings = [] } = reply.data;
-  const ctx = { fields, files };
+  const { fields, files, company, title, warnings = [], agree_to_terms: agreeToTerms = false } = reply.data;
+  const ctx = { fields, files, agreeToTerms };
   const problems = [];
   const label = (field) => clean(field.label).slice(0, 60);
   let filled = 0;
@@ -104,7 +137,7 @@ async function runFill(adapter) {
   for (const field of fields) {
     if (isEmpty(field.answer.value)) continue;
     try {
-      await adapter.fill(field, field.answer.value, ctx);
+      field.answer.value = await fillWithRetries((v) => adapter.fill(field, v, ctx), field, field.answer.value, adapter.optionsFor && (() => adapter.optionsFor(field)));
       filled++;
     } catch (error) {
       problems.push(`${label(field)}: ${error.message}`);

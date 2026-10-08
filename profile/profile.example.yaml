@@ -4,6 +4,7 @@
 # so read it through once and make sure each line is true for you.
 
 resume_path: ~/Documents/Resume.pdf     # your resume as a PDF
+transcript_path: null                   # a transcript PDF, uploaded when a form asks for one
 
 name:
   first: Alex
@@ -20,6 +21,7 @@ contact:
   state: California
   state_code: CA
   postal_code: "94105"
+  county: San Francisco          # some US forms (Oracle) ask for it
   full_address: 123 Main St, San Francisco, CA 94105
 
 links:

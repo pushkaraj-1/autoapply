@@ -69,7 +69,7 @@ const leverSite = {
     } else if (field.kind === "radio") {
       chooseLeverChoice(field.id, value);
     } else if (field.kind === "checkboxes") {
-      for (const item of value) chooseLeverChoice(field.id, item);
+      for (const item of [value].flat()) chooseLeverChoice(field.id, item); // one answer or a list; never letter by letter
     } else if (field.kind === "location") {
       await chooseLeverLocation(value);
     } else {

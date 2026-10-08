@@ -88,3 +88,80 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   })();
   return true; // keeps the channel open for the async reply
 });
+
+// ---- LinkedIn: "Queue this job" in the popup (linkedin.js) ----
+
+// LinkedIn tab id -> the job you asked to queue. After that, the tab LinkedIn's Apply
+// button opens (you click it yourself) is read for the company's page, closed, and
+// the job is sent to the queue. Nothing is added to LinkedIn's page.
+const captures = new Map();
+const watching = new Map(); // opened tab id -> LinkedIn tab id
+const CAPTURE_MS = 90000;
+const ICON = "icon128.png";
+
+// The company's page an opened tab is heading to, or null while it is still on LinkedIn
+// (whose /jobs/view/externalApply/<id>?url=... hop carries the address in `url`).
+function companyPage(url) {
+  try {
+    const page = new URL(url);
+    if (/(^|\.)linkedin\.com$/.test(page.hostname)) {
+      const inner = page.searchParams.get("url");
+      return inner && /^https?:\/\//.test(inner) ? inner : null;
+    }
+    return /^https?:$/.test(page.protocol) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function tellResult(title, message, ok) {
+  chrome.notifications.create({ type: "basic", iconUrl: ICON, title, message, priority: 1 });
+  chrome.action.setBadgeBackgroundColor({ color: ok ? "#2ec4b6" : "#f07167" });
+  chrome.action.setBadgeText({ text: ok ? "+1" : "!" });
+  setTimeout(() => chrome.action.setBadgeText({ text: "" }), 8000);
+  chrome.storage.session.set({ linkedinResult: { title, message, ok, at: Date.now() } });
+}
+
+async function finishCapture(linkedinTab, openedTab, url) {
+  const capture = captures.get(linkedinTab);
+  if (!capture) return;
+  captures.delete(linkedinTab);
+  watching.delete(openedTab);
+  clearTimeout(capture.timer);
+  chrome.tabs.remove(openedTab).catch(() => {});
+  const name = `${capture.job.title} at ${capture.job.company}`;
+  try {
+    const response = await fetch(SERVER + "/queue/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...capture.job, apply_url: url }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) tellResult("Not queued", `${name}: ${data.detail || `the server answered ${response.status}`}`, false);
+    else if (data.added) tellResult("Queued", `${name} (applies on ${data.site})`, true);
+    else tellResult("Saved, not queued", `${name}: ${data.reason || "see Find jobs"}`, false);
+  } catch {
+    tellResult("Not queued", `${name}: the local server isn't running`, false);
+  }
+}
+
+chrome.tabs.onCreated.addListener((tab) => {
+  if (tab.openerTabId == null || !captures.has(tab.openerTabId)) return;
+  watching.set(tab.id, tab.openerTabId);
+  const url = companyPage(tab.pendingUrl || tab.url || "");
+  if (url) finishCapture(tab.openerTabId, tab.id, url);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (!watching.has(tabId) || !change.url) return;
+  const url = companyPage(change.url);
+  if (url) finishCapture(watching.get(tabId), tabId, url);
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type !== "linkedinCapture" || message.tabId == null) return false;
+  const tabId = message.tabId;
+  clearTimeout(captures.get(tabId)?.timer);
+  const timer = setTimeout(() => {
+    if (captures.delete(tabId)) tellResult("Not queued", `${message.job.title}: Apply wasn't clicked within a minute and a half. Click Queue this job again.`, false);
+  }, CAPTURE_MS);
+  captures.set(tabId, { job: message.job, timer });
+  sendResponse(true);
+  return false;
+});

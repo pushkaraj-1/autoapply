@@ -16,7 +16,7 @@ from jobautomate.profile import load_profile
 
 JOB_PAGE = "https://ats.rippling.com/{board}/jobs/{job_id}"
 BASIC_KINDS = {"SHORT_ANSWER": "text", "PHONE_NUMBER": "text", "FILE": "file", "PRONOUN": "skip"}
-CUSTOM_KINDS = {"select": "select", "Text": "text", "text": "text"}
+CUSTOM_KINDS = {"select": "select", "Text": "text", "text": "text", "enum": "enum", "Date": "date"}
 
 
 def parse_url(url: str) -> tuple[str, str]:
@@ -59,7 +59,9 @@ def build_plan(job: dict, saved: dict | None = None) -> list[Field]:
             if q["uniqueKey"] in saved:
                 answer = Answer(saved[q["uniqueKey"]], "saved", "from answers.yaml")
             else:
-                field_type = "LongText" if q.get("questionType") == "LONG_ANSWER" else "String"
+                field_type = {"LONG_ANSWER": "LongText", "DATE": "Date"}.get(q.get("questionType"), "String")
+                if kind == "enum" and q.get("isMultiSelectEnabled"):
+                    field_type = "MultiValueSelect"
                 answer = resolve_later(q["title"], q["uniqueKey"], field_type, options, company, context, required=q["isRequired"])
             fields.append(Field(q["uniqueKey"], q["title"].strip(), kind, q["isRequired"], options, answer))
     return fields

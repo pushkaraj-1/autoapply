@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from jobautomate import autoapply, greenhouse, tracker
+from jobautomate.answers import closest_option
 from jobautomate.scanner import run as scan_run
 from jobautomate.scanner import store as scan_store
 from jobautomate.prepare import answer_fields, log_application, prepare, site_for, site_or_generic
@@ -35,6 +36,12 @@ class FieldsRequest(BaseModel):
     job: dict | None = None  # company, title, description read from the page
 
 
+class ChooseRequest(BaseModel):
+    label: str
+    wanted: str
+    options: list[str]
+
+
 class LogRequest(BaseModel):
     url: str
     company: str
@@ -46,6 +53,16 @@ class LogRequest(BaseModel):
 
 def encode(path: Path) -> dict:
     return {"name": path.name, "base64": base64.b64encode(path.read_bytes()).decode()}
+
+
+def upload_files() -> dict:
+    """The files a form may ask for: the resume, and the transcript when profile.yaml
+    names one (transcript_path)."""
+    files = {"resume": encode(resume_path())}
+    transcript = load_profile().get("transcript_path")
+    if transcript and Path(transcript).expanduser().exists():
+        files["transcript"] = encode(Path(transcript).expanduser())
+    return files
 
 
 @app.get("/health")
@@ -99,7 +116,7 @@ def plan(request: PlanRequest) -> dict:
     except ValueError as error:
         raise HTTPException(400, str(error))
     job = prepared_for(request.url)
-    files = {"resume": encode(resume_path())}
+    files = upload_files()
     if job.letter_pdf:
         files["cover_letter"] = encode(job.letter_pdf)
     return {
@@ -110,6 +127,7 @@ def plan(request: PlanRequest) -> dict:
         "files": files,
         "letter_text": job.letter_text,
         "warnings": job.warnings,
+        "agree_to_terms": bool(load_profile()["standing_answers"].get("agree_to_certifications")),
     }
 
 
@@ -121,7 +139,7 @@ def answer(request: FieldsRequest) -> dict:
     except ValueError as error:
         raise HTTPException(400, str(error))
     job = answer_fields(request.url, request.fields, request.job)
-    files = {"resume": encode(resume_path())}
+    files = upload_files()
     if job.letter_pdf:
         files["cover_letter"] = encode(job.letter_pdf)
     p = load_profile()
@@ -131,7 +149,7 @@ def answer(request: FieldsRequest) -> dict:
         "fields": greenhouse.plan_as_dicts(job.fields),
         "files": files,
         "warnings": job.warnings,
-        "profile": {k: p[k] for k in ("name", "contact", "links", "experience", "education", "languages", "skills", "standing_answers")},
+        "profile": {k: p[k] for k in ("name", "contact", "links", "experience", "education", "languages", "skills", "standing_answers", "demographics")},
     }
 
 
@@ -160,6 +178,12 @@ def login(request: PlanRequest, origin: str | None = Header(default=None)) -> di
     if not email or not password:
         raise HTTPException(404, "Add WORKDAY_EMAIL and WORKDAY_PASSWORD to the .env file and save it.")
     return {"email": email, "password": password}
+
+
+@app.post("/choose")
+def choose(request: ChooseRequest) -> dict:
+    """The page's option that means the same as an answer the page doesn't list as written."""
+    return {"option": closest_option(request.label, request.wanted, request.options[:200])}
 
 
 @app.post("/log")
@@ -338,7 +362,12 @@ class QueueRequest(BaseModel):
 
 
 class BestRequest(BaseModel):
-    limit: int = 20
+    limit: int = 50
+
+
+class CodeRequest(BaseModel):
+    job_id: str
+    code: str
 
 
 @app.get("/queue")
@@ -351,10 +380,37 @@ def queue_add(request: QueueRequest) -> dict:
     return autoapply.add(request.ids)
 
 
+class LinkRequest(BaseModel):
+    listing_url: str
+    apply_url: str
+    company: str
+    title: str
+    location: str = ""
+    description: str = ""
+
+
+@app.post("/queue/link")
+def queue_link(request: LinkRequest, origin: str | None = Header(default=None)) -> dict:
+    """A LinkedIn job and where its Apply button led, from the extension's Queue this button."""
+    if origin and not origin.startswith("chrome-extension://"):
+        raise HTTPException(403, "Only the extension may add jobs this way.")
+    if not request.apply_url.startswith(("https://", "http://")) or not request.title or not request.company:
+        raise HTTPException(400, "The job's title, company and link are needed.")
+    return autoapply.add_link(**request.model_dump())
+
+
 @app.post("/queue/best")
 def queue_best(request: BestRequest) -> dict:
     """Adds the best AI matches the queue can send by itself."""
     return autoapply.best(max(1, min(request.limit, 100)))
+
+
+@app.post("/queue/code")
+def queue_code(request: CodeRequest) -> dict:
+    """The security code a site emailed you, typed on the Queue page."""
+    if not autoapply.provide_code(request.job_id, request.code):
+        raise HTTPException(409, "The queue is not waiting for a code for this job anymore.")
+    return {"ok": True}
 
 
 @app.post("/queue/start")
@@ -366,6 +422,12 @@ def queue_start() -> dict:
 def queue_stop() -> dict:
     autoapply.stop()
     return autoapply.status()
+
+
+@app.post("/queue/skip")
+def queue_skip() -> dict:
+    """Ends the job being filled now; the queue goes on with the next one."""
+    return {"skipped": autoapply.skip(), **autoapply.status()}
 
 
 @app.put("/queue/settings")

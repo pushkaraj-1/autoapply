@@ -93,7 +93,13 @@
       .check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 400 !important; margin: 6px 0 !important; }
       input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
       .drawer-tools { display: flex; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--line); }
-    </style>
+    
+    .code-box { border: 1px solid var(--warn-line, #e7c48a); background: var(--warn-bg, #fdf6e9); border-radius: 10px; padding: 12px 14px; margin: 10px 0; display: grid; gap: 8px; }
+    .code-box form { display: flex; gap: 8px; flex-wrap: wrap; }
+    .code-box input { font: 600 16px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.2em; padding: 6px 10px; width: 14ch; text-transform: uppercase; }
+    .list-tools { display: flex; justify-content: flex-end; margin: 6px 0; }
+    .hint { color: #6b7280; font-size: 12px; margin: 4px 0 8px; }
+  </style>
   </head>
   <body>
     <main>
@@ -106,12 +112,14 @@
         <div class="header-actions">
           <button id="settings-button">Settings</button>
           <button id="best">Add best matches</button>
+          <button id="skip" hidden title="End the application being filled now and go on to the next job">Skip this job</button>
           <button class="primary" id="start">Start</button>
         </div>
       </header>
 
       <div id="error"></div>
       <div id="notice"></div>
+      <div id="code"></div>
 
       <section class="status">
         <div class="ring" id="ring"><span id="ring-text">0</span></div>

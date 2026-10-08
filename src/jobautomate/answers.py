@@ -35,6 +35,38 @@ def pick(options: list[str], *wanted: str) -> str | None:
     return None
 
 
+US_STATES = (
+    "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|"
+    "kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|"
+    "new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|"
+    "utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|district of columbia"
+)
+US_CITIES = (
+    "san francisco|sf bay|bay area|palo alto|mountain view|sunnyvale|santa clara|san jose|cupertino|menlo park|redwood city|san mateo|oakland|"
+    "berkeley|los angeles|santa monica|irvine|san diego|seattle|bellevue|redmond|kirkland|portland|new york|nyc|brooklyn|manhattan|boston|"
+    "chicago|austin|dallas|houston|denver|boulder|atlanta|miami|washington,? d\\.?c|arlington|reston|mclean|pittsburgh|philadelphia|"
+    "raleigh|durham|nashville|minneapolis|detroit|ann arbor|phoenix|salt lake city|columbus|st\\.? louis|las vegas|baltimore|newark|hoboken"
+)
+US_PLACE = re.compile(
+    rf"\b(united states|u\\.s\\.a?\\.?|usa|us|america|{US_STATES}|{US_CITIES})\b|,\s*(a[klrz]|c[aot]|d[ce]|fl|ga|hi|i[adln]|k[sy]|la|m[adeinost]|n[cdehjmvy]|o[hkr]|pa|ri|s[cd]|t[nx]|ut|v[at]|w[aivy])\b",
+    re.I,
+)
+# Places that are clearly outside the United States, even when a U.S. word appears too
+# ("Remote - Canada", "London, UK").
+NON_US_PLACE = re.compile(
+    r"\b(canada|toronto|vancouver|montreal|mexico|uk|united kingdom|england|london|ireland|dublin|germany|berlin|munich|france|paris|"
+    r"netherlands|amsterdam|spain|madrid|barcelona|italy|poland|warsaw|switzerland|zurich|sweden|stockholm|denmark|norway|finland|"
+    r"portugal|lisbon|israel|tel aviv|india|bangalore|bengaluru|hyderabad|pune|mumbai|delhi|chennai|singapore|japan|tokyo|china|"
+    r"shanghai|beijing|hong kong|taiwan|korea|seoul|australia|sydney|melbourne|brazil|argentina|colombia|emea|apac|latam|europe)\b",
+    re.I,
+)
+
+
+def us_options(options: list[str]) -> list[str]:
+    """Options that are places in the United States (or remote with no other country)."""
+    return [o for o in options if not NON_US_PLACE.search(o) and (US_PLACE.search(o) or re.fullmatch(r"\W*remote\W*(\(?us(a)?\)?)?\W*", o, re.I))]
+
+
 def yes_no(options: list[str], yes: bool) -> str | None:
     if yes:
         return pick(options, "yes", "i agree", "agree", "i accept", "accept", "true")
@@ -100,6 +132,10 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
             return Answer("cover_letter", "profile", "file upload")
         if "resume" in q or "cv" in q.split() or field_name in ("resume", "_systemfield_resume"):
             return Answer("resume", "profile", "file upload")
+        if re.search(r"transcript", q):
+            if p.get("transcript_path"):
+                return Answer("transcript", "profile", "file upload")
+            return Answer(None, "ask" if required else "skip", "no transcript in profile.yaml (transcript_path)")
         if re.search(r"photo|picture|avatar|headshot|image", q):
             return Answer(None, "skip", "no photo is uploaded")
         return Answer(None, "ask", "unknown file upload, needs your answer")
@@ -116,6 +152,9 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
         return Answer(contact["full_address"], "profile")
     if re.fullmatch(r"(postal|zip|zip code|postal code|zip/postal code|postcode)", q):
         return Answer(contact["postal_code"], "profile")
+    if q == "county" and contact.get("county"):
+        # Its list may have been read before the city was chosen; then type it.
+        return Answer((pick(options, contact["county"]) if options else None) or contact["county"], "profile")
     if re.fullmatch(r"address line 2|apartment.*|suite.*|county", q):
         return Answer(None, "skip", "optional")
     if re.fullmatch(r"(set )?(your |current )?location( \(city\))?|city, state|current city|where are you (currently )?(located|based)\??", q) and not options:
@@ -124,6 +163,14 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
         return Answer(contact["city"], "profile")
     if re.fullmatch(r"(county/)?state(/province| or province|/region)?|province", q):
         return Answer(pick(options, contact["state"], contact["state_code"]) if options else contact["state"], "profile")
+    if re.search(r"graduat", q) and re.search(r"\bdate\b|\bwhen\b|month|year", q) and not options:
+        end = str((p.get("education") or [{}])[0].get("end") or p["work_authorization"].get("graduation_date") or "")
+        if re.fullmatch(r"\d{4}-\d{2}", end):
+            # Date boxes get a full date (mid-month); text boxes get "December 2026".
+            if field_type in ("Date", "date"):
+                return Answer(f"{end}-15", "profile")
+            year, month = end.split("-")
+            return Answer(f"{['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][int(month) - 1]} {year}", "profile")
     if q in ("middle name", "middle initial"):
         return Answer(None, "skip", "optional")
     # "Full legal name in native language (e.g. Chinese characters)": the English name (user, 2026-10-05).
@@ -158,7 +205,7 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
     if link_field and ("website" in q or "portfolio" in q):
         return Answer(p["links"]["website"], "profile")
     # Other profile links (Google Scholar, X, Kaggle, ...): there is none to give.
-    if link_field and re.search(r"scholar|twitter|\bx\b|kaggle|dribbble|behance|stack ?overflow|medium|leetcode|hugging ?face|profile|url|\blink\b|handle", q) and not re.search(r"name|email|phone|address|why|describe", q):
+    if link_field and re.search(r"scholar|twitter|\bx\b|kaggle|dribbble|behance|stack ?overflow|medium|leetcode|hugging ?face|profile|\burl\b|\blink\b|handle", q) and not re.search(r"name|email|phone|address|why|describe", q):
         if not required:
             return Answer(None, "skip", "optional; no such profile to link")
         return Answer(None, "ask", "needs your answer: asks for a profile link that is not in your profile")
@@ -173,10 +220,31 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
         if found:
             return Answer(found if multi else found[0], "profile")
     if "pronoun" in q:
-        return Answer(p.get("pronouns"), "skip" if not p.get("pronouns") else "profile", "optional")
+        if p.get("pronouns"):
+            if not options:
+                return Answer(p["pronouns"], "profile")
+            # "He/him/his" also matches lists that say "He/Him"; never a bare "he" (it is in "she" and "they").
+            parts = [x.strip() for x in p["pronouns"].split("/")]
+            found = pick(options, p["pronouns"], "/".join(parts[:2]), " / ".join(parts[:2]))
+            if found:
+                return Answer(choice(found), "profile")
+        if not required:
+            return Answer(None, "skip", "optional")
+        # Required with nothing in the profile: decline, where the form allows it.
+        declined = next((o for o in options if re.search(r"prefer not|rather not|decline|not to (say|answer|disclose)", o, re.I)), None)
+        return Answer(choice(declined), "rule") if declined else Answer(None, "ask", "needs your answer: pronouns (set pronouns in profile.yaml to answer these yourself)")
     if "preferred" in q and "name" in q:
-        return Answer(p["name"].get("preferred"), "skip", "optional")
+        preferred = p["name"].get("preferred")
+        if preferred or required:
+            return Answer(preferred or p["name"]["first"], "profile")  # a required box gets the first name
+        return Answer(None, "skip", "optional")
 
+    # "If you answered no, write your country of citizenship in the box below": the
+    # country, not Yes/No (Corning's export question).
+    if not options and re.search(r"\b(write|enter|list|provide|state)\b[^.]{0,80}\bcountr(y|ies)(/region)? of (citizenship|nationality)", q):
+        if "united states" not in p["work_authorization"]["citizenship"].lower():
+            return Answer(p["work_authorization"]["citizenship"], "rule")
+        return Answer("Not applicable", "rule")
     # Not a U.S. citizen; jobs that ask are skipped by the queue (prepare.form_warnings).
     if re.search(US_CITIZEN, q):
         citizen = "united states" in p["work_authorization"]["citizenship"].lower()
@@ -236,7 +304,8 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
                 return Answer(yes_no(options, p["standing_answers"]["accept_stated_salary"]), "rule")
             return Answer(None, "ask", "needs your answer: this asks you to pick a salary range")
         salary = p["standing_answers"]["salary"]
-        hourly = re.search(r"hour|hourly|/hr|per hr", q)
+        # "Desired salary or hourly rate" gets the salary answer; only hourly-only questions get the rate.
+        hourly = re.search(r"hour|hourly|/hr|per hr", q) and not re.search(r"salary|annual|yearly|per year", q)
         numbers_only = field_type == "Number"
         if hourly:
             return Answer(str(salary["hourly_number"]) if numbers_only else salary["hourly_text"], "rule")
@@ -256,12 +325,19 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
         return Answer(yes_no(options, home_state), "rule")
     if options and re.search(r"(open|willing) to (relocat|move)|or relocat", q) and pick(options, "yes"):
         return Answer(yes_no(options, p["preferences"]["willing_to_work_onsite"]), "rule")
-    residence = re.search(r"(resid\w*|live|living|located|based) in ([^?]+)", q)
+    residence = re.search(r"\b(?:are you|do you|you are|you currently|you're)\b(?: currently| presently| now)? (?:resid\w*|live|living|located|based) in ([^?]+)", q)
     if residence and options and not re.search(r"if you (are|do) not|if not", q):
-        place = residence.group(2)
-        home = (p["contact"]["city"].lower(), p["contact"]["state"].lower(), "united states", "the us", "u.s.", "usa")
-        if not any(h in place for h in home):
-            return Answer(None, "ask", f"needs your answer: asks if you currently live in {place.strip()[:40]}; you live in {p['contact']['city']}")
+        place = residence.group(1)
+        contact = p["contact"]
+        home = rf"\b({re.escape(contact['city'].lower())}|{re.escape(contact['state'].lower())}|{re.escape(contact['state_code'].lower())}|united states|u\.?s\.?a?|america|north america)\b"
+        # Where you live is a plain fact from the profile: Yes for your city, state or
+        # country, No for anywhere else (sanctioned countries included).
+        return Answer(yes_no(options, bool(re.search(home, place))), "rule")
+    us_states = sum(1 for o in options if o.strip().lower() in ("california", "texas", "new york", "florida", "washington", "illinois", "ohio", "georgia", "virginia", "colorado"))
+    if us_states >= 4 and re.search(r"\bstate\b|resid|located|live", q):
+        found = pick(options, p["contact"]["state"], p["contact"]["state_code"])
+        if found:
+            return Answer(choice(found), "rule")
     arrangement = re.search(r"remote|hybrid|on-?site|in[- ]office|in person|relocat|commut|work(ing)? (model|arrangement|environment)", q)
     location_preference = (
         re.search(r"prefer|preference|open to|willing to work", q) and re.search(r"location|office|city|cities|where", q)
@@ -271,14 +347,23 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
         if options and pick(options, "yes") and pick(options, "no"):
             return Answer(yes_no(options, prefs["willing_to_work_onsite"]), "rule")
         if options and prefs["open_to_any_arrangement"]:
-            if multi:  # select every option that is a work arrangement or place
-                return Answer([o for o in options if not re.search(r"\bnone\b|\bnot\b|decline|neither|only interested in remote", o, re.I)], "rule")
-            flexible = pick(options, "both", "any", "either", "all of", "flexible", "open to", "no preference")
+            if multi:  # select every option that is a work arrangement or a U.S. place
+                return Answer([o for o in options if not re.search(r"\bnone\b|\bnot\b|decline|neither|only interested in remote", o, re.I) and not NON_US_PLACE.search(o)], "rule")
+            # Whole words only: "any" must not match "Germany".
+            flexible = next((o for o in options if re.search(r"\b(both|any|either|all of|flexible|open to|no preference)\b", o, re.I) and not NON_US_PLACE.search(o)), None)
             if flexible:
                 return Answer(flexible, "rule")
             if arrangement:
                 return Answer(pick(options, "hybrid", "on-site", "onsite", "in office", "in-office"), "rule")
-            return Answer(None, "ask", "needs your answer: this asks you to pick one location")
+            # Open to any location in the United States: an office in your city or
+            # state, else the first U.S. office, else remote; never one abroad.
+            home = pick(options, p["contact"]["city"], p["contact"]["state"]) or next((o for o in options if re.search(rf",\s*{re.escape(p['contact']['state_code'])}\b", o)), None)
+            us = us_options(options)
+            offices = [o for o in us if not re.search(r"\bremote\b", o, re.I)]
+            choice_ = home if home and not NON_US_PLACE.search(home) else (offices or us or [None])[0]
+            if choice_:
+                return Answer(choice_, "rule")
+            return Answer(None, "ask", "needs your answer: none of the locations offered is in the United States")
         if not options and location_preference:
             return Answer(prefs["location_text"], "rule")
         if not options and re.search(r"prefer|preference|willing|open to|able to", q):
@@ -383,7 +468,8 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
             return Answer(None, "ask", "needs your answer: criminal history question")
         return Answer(yes_no(options, record) if options else ("Yes" if record else "No"), "rule")
     # Follow-ups that only apply when the previous answer was yes.
-    if re.match(r"(if (yes|so)\b|if you answered (yes|\"yes\")|please (provide|explain|describe|list).{0,80}\bif (yes|so|you answered yes)\b)", q) and not options:
+    # A required one (often "write N/A if not") is answered like any other question.
+    if re.match(r"(if (yes|so)\b|if you answered (yes|\"yes\")|please (provide|explain|describe|list).{0,80}\bif (yes|so|you answered yes)\b)", q) and not options and not required:
         return Answer(None, "skip", "only needed if the answer above was yes")
 
     # A bare box label ("From", "Company", "Job Title") belongs to a form section about
@@ -393,6 +479,11 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
     # The company asks for answers not written with AI, so they are yours to write.
     if not options and re.search(r"\bno ai\b|not (be )?(written|generated) (by|with|using) ai|without (the )?(use of |help of )?(ai|chatgpt|llms?)\b|\bai[- ]generated|don'?t use (ai|chatgpt)", q):
         return Answer(None, "ask" if required else "skip", "the company asks for answers not written by AI")
+    # Optional questions the rules above don't answer are left blank: no AI, no time
+    # spent, nothing guessed (user, 2026-10-07: "its not necessary fields, then dont
+    # waste time selecting it").
+    if not required:
+        return Answer(None, "skip", "optional; left blank")
     answer = ask_llm(label, options, company, context, essay=is_essay(label, field_type, options))
     # An optional question the facts don't settle is left blank rather than asked.
     if answer.source == "ask" and not required:
@@ -452,7 +543,10 @@ def essay_rule(label: str) -> str:
         target = f"between {least} and {int(most * 0.9)} {unit}" if least else f"no more than {int(most * 0.9)} {unit}"
     elif least:
         target = f"at least {least} {unit}, and not much more than {int(least * 1.4)}"
-    elif re.search(r"\b(briefly|brief|short|a few sentences|one sentence|1-2 sentences|two sentences)\b", label.lower()):
+    elif m := re.search(r"\b(1|one|2|two|3|three)(?:\s*(?:-|–|—|to|or)\s*(1|one|2|two|3|three|4|four))?\s+sentences?\b", label.lower()):
+        # "In 1–2 sentences", "one sentence", "2 to 3 sentences": exactly that many.
+        target = f"{m.group(0).strip()}, no more"
+    elif re.search(r"\b(briefly|brief|short|a few sentences)\b", label.lower()):
         target = "two to four sentences"
     else:
         target = "about 120 to 200 words"
@@ -582,3 +676,30 @@ def fit_length(answer: str, label: str, messages: list[dict], model: str | None)
         cut = answer[:most]
         answer = cut[: cut.rfind(".") + 1] if "." in cut else cut
     return answer
+
+
+def closest_option(label: str, wanted: str, options: list[str]) -> str | None:
+    """The option on the page that means the same as an answer that is not in the list
+    as written ("Yes, I am authorized" for "Yes", "Los Angeles, CA, USA" for "Los Angeles,
+    California"). None when no option says the same thing; the field then goes to you."""
+    options = [o for o in options if o and o.strip()]
+    if not options or not wanted:
+        return None
+    found = pick(options, wanted)
+    if found:
+        return found
+    prompt = f"""A job application question has a list of options. The applicant's answer is not written exactly like any option.
+Pick the ONE option that means the same thing as the answer. If no option means the same thing, reply NONE. Never pick an option that changes the meaning (for example a different country, a different yes/no, a different number range).
+
+Question: {label}
+Answer: {wanted}
+Options: {json.dumps(options)}
+
+Reply with JSON only: {{"option": "<an option copied exactly, or NONE>"}}"""
+    raw = llm.chat([{"role": "user", "content": prompt}], temperature=0, max_tokens=200)
+    match = re.search(r"\{.*\}", raw, re.S)
+    try:
+        option = json.loads(match.group(0)).get("option") if match else None
+    except json.JSONDecodeError:
+        return None
+    return option if option in options else None

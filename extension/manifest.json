@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Job Autofill",
-  "version": "0.21.2",
+  "version": "0.26.0",
   "description": "Fills job applications from your profile using the local jobautomate server.",
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "notifications"
   ],
   "host_permissions": [
     "http://127.0.0.1:8765/*",
@@ -56,5 +57,8 @@
       "all_frames": true,
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "icons": {
+    "128": "icon128.png"
+  }
 }

@@ -73,6 +73,9 @@
 
       #status { margin-top: 10px; white-space: pre-wrap; color: var(--muted); font-size: 12px; max-height: 220px; overflow: auto; }
       #status:empty { display: none; }
+      .linkedin .name { font-weight: 650; }
+      .linkedin .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+      .linkedin .fill { margin: 10px 0 4px; }
       code { background: var(--card); padding: 1px 4px; border-radius: 4px; color: var(--text); }
     </style>
   </head>
@@ -101,6 +104,13 @@
         </div>
       </div>
       <div class="week" id="week"></div>
+    </section>
+
+    <section class="card linkedin" id="linkedin" hidden>
+      <div class="name">LinkedIn job</div>
+      <div class="hint" id="li-job">Reading nothing yet. Click below on a job's page.</div>
+      <button class="fill li" id="li-queue">Queue this job</button>
+      <div class="hint" id="li-step"></div>
     </section>
 
     <button class="fill" id="fill" disabled>
@@ -134,6 +144,7 @@
     </label>
 
     <div id="status"></div>
+    <script src="linkedin.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
