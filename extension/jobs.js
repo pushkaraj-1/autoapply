@@ -1,5 +1,5 @@
-// Find jobs: the scanned jobs from data/jobs.db, with scan controls, filters, the AI
-// fit check, and an Apply button that opens the form and fills it with the extension.
+// Find jobs: the scanned jobs from data/jobs.db (the last 10 days), with scan controls,
+// filters, and an Apply button that opens the form and fills it with the extension.
 
 const SERVER = "http://127.0.0.1:8765";
 const PAGE = 150;
@@ -76,7 +76,6 @@ async function load() {
 function filtered() {
   const words = $("search").value.trim().toLowerCase();
   const minFit = Number($("min-fit").value);
-  const ai = $("ai").value;
   const hideApplied = $("hide-applied").checked;
   const showHidden = $("show-hidden").checked;
   const list = jobs.filter((j) => {
@@ -84,10 +83,6 @@ function filtered() {
     if (hideApplied && j.applied) return false;
     if (source && j.source !== source) return false;
     if (minFit && (j.fit ?? 0) < minFit) return false;
-    if (ai === "recommended" && !j.recommend) return false;
-    if (ai === "strong" && j.verdict !== "strong") return false;
-    if (ai === "noflags" && (j.deep_fit == null || j.red_flags.length)) return false;
-    if (ai === "unscored" && j.deep_fit != null) return false;
     if (words && !`${j.title} ${j.company} ${j.location}`.toLowerCase().includes(words)) return false;
     return true;
   });
@@ -108,7 +103,6 @@ function renderStats() {
     [visible.length, `jobs in this date range`],
     [visible.filter((j) => j.first_seen === today).length, "found today"],
     [visible.filter((j) => (j.fit ?? 0) >= 70).length, "strong title fit"],
-    [visible.filter((j) => j.recommend && !j.red_flags.length).length, "AI says apply, no red flags"],
     [visible.filter((j) => j.applied).length, "applied"],
   ];
   $("stats").replaceChildren(...stats.map(([n, label]) => el("div", { class: "stat" }, el("b", {}, n.toLocaleString()), el("span", {}, label))));
@@ -128,12 +122,6 @@ function fitCell(job) {
   return el("span", { class: `score ${band(job.fit)}`, title: tip }, job.fit == null ? "–" : String(job.fit));
 }
 
-function aiCell(job) {
-  if (job.deep_fit == null) return el("span", { class: "score", title: "Not checked yet. Open the job and click Check fit with AI." }, "·");
-  const tip = [job.verdict && `${job.verdict}${job.recommend ? ", worth applying" : ", skip"}`, ...job.reasons.map((r) => `+ ${r}`), ...job.gaps.map((g) => `gap: ${g}`)].join("\n");
-  return el("button", { class: "ai", title: tip, onclick: () => openJob(job) }, el("span", { class: `score ${band(job.deep_fit)}` }, String(job.deep_fit)));
-}
-
 function render() {
   renderStats();
   renderChips();
@@ -141,13 +129,11 @@ function render() {
   const rows = list.slice(0, shown).map((job) => {
     const applied = el("input", { type: "checkbox", title: "Applied (adds it to your tracker)", checked: job.applied, onchange: (e) => setApplied(job, e.target.checked) });
     const title = el("div", { class: "title" }, el("a", { href: "#", onclick: (e) => (e.preventDefault(), openJob(job)) }, job.title));
-    if (job.red_flags?.length) title.append(el("div", { class: "flags" }, job.red_flags.slice(0, 2).map((f) => el("span", { class: "flag" }, f))));
     return el(
       "tr",
       { class: `${job.applied ? "applied" : ""} ${job.hidden ? "is-hidden" : ""}` },
       el("td", {}, applied),
       el("td", {}, fitCell(job)),
-      el("td", {}, aiCell(job)),
       el("td", {}, title),
       el("td", {}, job.company || ""),
       el("td", { class: "small" }, job.location || ""),
@@ -157,7 +143,7 @@ function render() {
       el("td", {}, el("button", { class: "icon-btn", title: job.hidden ? "Show again" : "Hide this job", onclick: () => setHidden(job, !job.hidden) }, job.hidden ? "↺" : "×")),
     );
   });
-  $("rows").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: 10, class: "empty" }, jobs.length ? "No jobs match these filters." : "No jobs yet. Click Scan for new jobs."))]));
+  $("rows").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: 9, class: "empty" }, jobs.length ? "No jobs match these filters." : "No jobs yet. Click Scan for new jobs."))]));
   $("more").hidden = list.length <= shown;
   $("more").textContent = `Show more (${(list.length - shown).toLocaleString()} left)`;
   document.querySelectorAll("th[data-sort]").forEach((th) => {
@@ -175,7 +161,7 @@ async function apply(job) {
 
 // Jobs the auto apply queue can send by itself: Greenhouse, Lever, Ashby, Workday and
 // Rippling forms, and company career pages that show a Greenhouse form (?gh_jid=).
-const QUEUE_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|myworkday\.com)$|^ats\.rippling\.com$|\.oraclecloud\.com$|\.icims\.com$|^(workforcenow|myjobs)\.adp\.com$/;
+const QUEUE_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|myworkday\.com)$|^ats\.rippling\.com$|\.oraclecloud\.com$|\.icims\.com$|^(workforcenow|myjobs)\.adp\.com$|^apply\.workable\.com$/;
 const QUEUE_LABELS = { queued: "Queued", running: "Filling", submitted: "Sent", needs_you: "Needs you", unconfirmed: "Check email", ready: "Test run", skipped: "Skipped", failed: "Failed" };
 
 function queueButton(job) {
@@ -228,24 +214,21 @@ function showProgress(p) {
   card.classList.add("show");
   $("scan").disabled = Boolean(p.running);
   $("scan").textContent = p.running ? "Scanning..." : "Scan for new jobs";
-  const scoring = p.phase === "score";
   const found = p.matched ? `, ${p.matched} found on the company's own site` : "";
   $("scan-title").textContent = p.running
-    ? scoring ? `Checking fit with AI: ${p.scored} of ${p.to_score}` : p.phase === "match" ? `Finding ${p.to_match} LinkedIn, Indeed and other listings on the companies' own sites...` : "Scanning job sources..."
-    : p.error ? `The scan stopped: ${p.error}` : `Scan finished. ${p.added} new job${p.added === 1 ? "" : "s"}${found}${p.to_score ? `, ${p.scored} checked with AI` : ""}.`;
+    ? p.phase === "match" ? `Finding ${p.to_match} LinkedIn, Indeed and other listings on the companies' own sites...` : "Scanning job sources..."
+    : p.error ? `The scan stopped: ${p.error}` : `Scan finished. ${p.added} new job${p.added === 1 ? "" : "s"}${found}.`;
   $("scan-numbers").textContent = p.stale ? `${p.stale} older than your date limit skipped` : "";
   $("scan-sources").replaceChildren(
     ...(p.sources || []).map((s) => el("span", { class: `source ${s.state}`, title: s.state === "done" ? `found ${s.found}, ${s.added} new, in ${s.seconds ?? "?"} seconds` : s.state }, `${sourceName(s.key)}${s.state === "done" ? ` +${s.added}` : ""}`)),
   );
-  $("score-bar").hidden = !scoring || !p.to_score;
-  $("score-fill").style.width = p.to_score ? `${(100 * p.scored) / p.to_score}%` : "0";
   const notices = p.notices || [];
   $("notices").hidden = !notices.length;
   $("notices-title").textContent = `${notices.length} notice${notices.length === 1 ? "" : "s"} (sources that failed or were skipped)`;
   $("notices-list").replaceChildren(...notices.map((n) => el("div", {}, n)));
 }
 
-// While a scan runs, new jobs and AI scores show up as they arrive, not only at the end.
+// While a scan runs, new jobs show up as they arrive, not only at the end.
 let lastSeen = "";
 let lastReload = 0;
 async function refreshJobs() {
@@ -264,7 +247,7 @@ function startPolling() {
     try {
       const p = await call("/jobs/progress");
       showProgress(p);
-      const seen = `${p.added || 0}/${p.scored || 0}`;
+      const seen = `${p.added || 0}`;
       if (p.running && seen !== lastSeen && Date.now() - lastReload > 3000) {
         lastSeen = seen;
         lastReload = Date.now();
@@ -301,41 +284,14 @@ async function openJob(job) {
     el("button", { class: "primary", onclick: () => apply(job) }, "Apply"),
     queueButton(job),
     el("a", { class: "button", href: job.url, target: "_blank" }, "Open the posting"),
-    el("button", { id: "check-ai", onclick: () => checkWithAi(job) }, job.deep_fit == null ? "Check fit with AI" : "Check again"),
     el("button", { onclick: closeJob }, "Close"),
   ];
   $("d-tools").replaceChildren(...tools);
   const body = [];
-  if (full.deep_fit != null) {
-    body.push(el("h3", {}, `AI fit: ${full.deep_fit} (${full.verdict}${full.recommend ? ", worth applying" : ", probably skip"})`));
-    if (full.reasons.length) body.push(el("div", { class: "small muted" }, "Matches"), el("ul", {}, full.reasons.map((r) => el("li", {}, r))));
-    if (full.gaps.length) body.push(el("div", { class: "small muted" }, "Gaps"), el("ul", {}, full.gaps.map((g) => el("li", {}, g))));
-    if (full.red_flags.length) body.push(el("div", { class: "small muted" }, "Red flags"), el("ul", {}, full.red_flags.map((f) => el("li", {}, f))));
-  }
   body.push(el("h3", {}, "Job description"));
-  body.push(full.description ? el("div", { class: "jd" }, full.description) : el("p", { class: "muted" }, "Not loaded yet. It is fetched when the AI checks the fit, or open the posting to read it."));
+  body.push(full.description ? el("div", { class: "jd" }, full.description) : el("p", { class: "muted" }, "Not saved for this job. Open the posting to read it."));
   $("d-body").replaceChildren(...body);
   document.body.classList.add("open");
-}
-
-async function checkWithAi(job) {
-  try {
-    await call("/jobs/score", { method: "POST", body: JSON.stringify({ ids: [job.id] }) });
-    $("check-ai").disabled = true;
-    $("check-ai").textContent = "Checking...";
-    startPolling();
-    const wait = setInterval(async () => {
-      const p = await call("/jobs/progress").catch(() => null);
-      if (p && !p.running) {
-        clearInterval(wait);
-        await load();
-        const fresh = jobs.find((j) => j.id === job.id);
-        if (document.body.classList.contains("open")) openJob(fresh || job);
-      }
-    }, 1500);
-  } catch (error) {
-    showError(`Could not start the AI check: ${error.message}`);
-  }
 }
 
 function closeJob() {
@@ -352,10 +308,8 @@ async function openSettings() {
   const terms = el("textarea", {}, s.search_terms.join("\n"));
   const include = el("textarea", { style: "min-height: 110px" }, s.title_filter.positive.join("\n"));
   const exclude = el("textarea", { style: "min-height: 110px" }, s.title_filter.negative.join("\n"));
-  const maxAge = el("select", {}, [1, 3, 7, 14, 30, 0].map((d) => el("option", { value: d, selected: d === s.max_age_days }, d ? `Posted in the last ${d} day${d === 1 ? "" : "s"}` : "Any date")));
+  const maxAge = el("select", {}, [1, 3, 7, 10].map((d) => el("option", { value: d, selected: d === s.max_age_days }, `Posted in the last ${d} day${d === 1 ? "" : "s"}`)));
   const auto = el("select", {}, [0, 6, 12, 24].map((h) => el("option", { value: h, selected: h === Number(s.auto_scan_hours) }, h ? `Every ${h} hours` : "Off")));
-  const deepOn = el("input", { type: "checkbox", checked: s.deep_score.enabled !== false });
-  const minFit = el("input", { type: "number", min: 0, max: 100, value: s.deep_score.min_fit ?? 70, style: "width: 70px" });
   const boxes = Object.entries(s.sources).map(([name, on]) => el("label", { class: "check" }, el("input", { type: "checkbox", "data-source": name, checked: on }), sourceName(name)));
   $("d-body").replaceChildren(
     el("label", {}, "Search terms (one per line)"), terms,
@@ -364,8 +318,6 @@ async function openSettings() {
     el("label", {}, "How recent"), maxAge,
     el("label", {}, "Scan by itself while the server runs"), auto,
     el("label", {}, "Sources"), el("div", { class: "grid2" }, boxes),
-    el("label", {}, "AI fit check after each scan"),
-    el("div", { class: "check" }, deepOn, "Check new jobs with a fit score of at least", minFit),
   );
   const lines = (area) => area.value.split("\n").map((l) => l.trim()).filter(Boolean);
   $("d-tools").replaceChildren(
@@ -377,7 +329,6 @@ async function openSettings() {
           max_age_days: Number(maxAge.value),
           auto_scan_hours: Number(auto.value),
           sources: Object.fromEntries([...document.querySelectorAll("[data-source]")].map((b) => [b.dataset.source, b.checked])),
-          deep_score: { enabled: deepOn.checked, min_fit: Number(minFit.value) },
         }) });
         closeJob();
       } catch (error) {
@@ -394,7 +345,7 @@ async function openSettings() {
 $("settings-button").addEventListener("click", openSettings);
 $("drawer-back").addEventListener("click", closeJob);
 $("more").addEventListener("click", () => ((shown += PAGE), render()));
-for (const id of ["search", "min-fit", "ai", "hide-applied", "show-hidden"]) $(id).addEventListener("input", () => ((shown = PAGE), render()));
+for (const id of ["search", "min-fit", "hide-applied", "show-hidden"]) $(id).addEventListener("input", () => ((shown = PAGE), render()));
 $("days").addEventListener("change", () => ((shown = PAGE), load()));
 document.querySelectorAll("th[data-sort]").forEach((th) =>
   th.addEventListener("click", () => {

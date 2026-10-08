@@ -171,6 +171,14 @@ const wallSite = {
 
 // Title and company for these platforms, or null to use the general reading.
 function atsJobInfo() {
+  // Workable: the tab reads "Founding Product Engineer - Raydar - Application".
+  if (location.hostname === "apply.workable.com") {
+    const parts = document.title.split(" - ").map(clean);
+    if (parts.length >= 3) {
+      const main = document.querySelector("main") || document.body;
+      return { title: parts.slice(0, -2).join(" - ").replace(/^\*\s*/, ""), company: parts[parts.length - 2], description: clean(main.innerText).slice(0, 12000) };
+    }
+  }
   if (ATS_ADP) {
     const heading = document.querySelector(".job-description-title, h2");
     const body = document.querySelector(".job-description-data, .job-description, main");

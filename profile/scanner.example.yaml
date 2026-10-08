@@ -90,6 +90,7 @@ title_filter:
   - Doctoral
   - Senior
   - Sr.
+  - Sr
   - Staff
   - Principal
   - Distinguished
@@ -320,7 +321,7 @@ sources:
 # ── Fit score ───────────────────────────────────────────────────────
 # Quick score from the job title alone (0-100): +45 for a strong role, +8 per
 # core skill (up to +32), +15 for a target level, -40 for an off-target word,
-# starting from 20. Jobs scoring 70+ also get an AI fit check against your resume.
+# starting from 20.
 scoring:
   strong_roles:        # title matches one → strong role fit
   - "AI Engineer"
@@ -387,13 +388,6 @@ scoring:
   - "Sales"
   - "Marketing"
 
-# ── AI fit check ────────────────────────────────────────────────────
-# After each scan, new jobs with a fit score at or above min_fit get their full
-# description read and judged against your resume (up to `limit` per scan).
-deep_score:
-  enabled: true
-  min_fit: 0
-  limit: 60
 auto_scan_hours: 0
 auto_apply:
   submit: false

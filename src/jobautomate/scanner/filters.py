@@ -20,7 +20,8 @@ NON_US = re.compile(
 def word_patterns(words, flexible: bool = False) -> list[tuple[str, re.Pattern]]:
     # flexible lets role nouns match variants: "Software Engineer" also matches "Software Engineering".
     suffix = r"(?:s|ing)?" if flexible else ""
-    return [(w, re.compile(rf"\b{re.escape(w)}{suffix}\b", re.I)) for w in words or []]
+    # Not \b: a word ending in punctuation ("Sr.") has no word boundary after it.
+    return [(w, re.compile(rf"(?<!\w){re.escape(w)}{suffix}(?!\w)", re.I)) for w in words or []]
 
 
 def title_filter(cfg: dict | None):

@@ -50,12 +50,15 @@ async function chooseOption(id, wanted) {
 async function chooseLocation(id, place) {
   const input = document.getElementById(id);
   if (!input) throw new Error("field not found on the page");
-  realClick(input.closest(".select__control"));
-  await sleep(80);
-  setNativeValue(input, place.split(",")[0]);
+  const search = async (typed, match, ms = 10000) => {
+    realClick(input.closest(".select__control"));
+    await sleep(80);
+    setNativeValue(input, typed);
+    return waitFor(() => match(menuOptions(id)), ms);
+  };
   const state = place.split(",").slice(-1)[0].trim().toLowerCase();
-  const option = await waitFor(() => menuOptions(id).find((o) => clean(o.innerText).toLowerCase().includes(state)) || null, 10000);
-  if (!option) throw new Error("no matching city in the suggestions");
+  const option = (await search(place.split(",")[0], (options) => options.find((o) => clean(o.innerText).toLowerCase().includes(state)) || null)) || (await countryInstead(search));
+  if (!option) throw new Error("no matching city or country in the suggestions");
   realClick(option);
   await sleep(80);
 }

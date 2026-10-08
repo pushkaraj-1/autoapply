@@ -149,7 +149,6 @@
       <section class="card scan" id="scan-card">
         <div class="scan-head"><span id="scan-title"></span><span class="muted small" id="scan-numbers"></span></div>
         <div class="sources" id="scan-sources"></div>
-        <div class="bar" id="score-bar" hidden><div id="score-fill"></div></div>
         <details class="notices" id="notices" hidden><summary id="notices-title"></summary><div id="notices-list"></div></details>
       </section>
 
@@ -160,21 +159,13 @@
         <select id="days" title="Posted within">
           <option value="1">Past 24 hours</option>
           <option value="3">Past 3 days</option>
-          <option value="7" selected>Past 7 days</option>
-          <option value="30">Past 30 days</option>
-          <option value="0">Any date</option>
+          <option value="7">Past 7 days</option>
+          <option value="10" selected>Past 10 days</option>
         </select>
         <select id="min-fit" title="Fit">
           <option value="0">Any fit</option>
           <option value="45">Fit 45+</option>
           <option value="70">Fit 70+</option>
-        </select>
-        <select id="ai" title="AI verdict">
-          <option value="">Any AI verdict</option>
-          <option value="recommended">AI says apply</option>
-          <option value="strong">Strong only</option>
-          <option value="noflags">No red flags</option>
-          <option value="unscored">Not checked yet</option>
         </select>
         <label class="check"><input type="checkbox" id="hide-applied" checked /> Hide applied</label>
         <label class="check"><input type="checkbox" id="show-hidden" /> Show hidden</label>
@@ -187,7 +178,6 @@
             <tr>
               <th class="nosort" title="Applied">✓</th>
               <th data-sort="fit">Fit</th>
-              <th data-sort="deep_fit">AI</th>
               <th data-sort="title">Role</th>
               <th data-sort="company">Company</th>
               <th data-sort="location">Location</th>

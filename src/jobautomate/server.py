@@ -274,10 +274,6 @@ class ScanRequest(BaseModel):
     only: list[str] | None = None  # source names; all enabled sources when empty
 
 
-class ScoreRequest(BaseModel):
-    ids: list[str]
-
-
 class AppliedRequest(BaseModel):
     on: bool
 
@@ -290,8 +286,8 @@ def scanned_job(job_id: str) -> dict:
 
 
 @app.get("/jobs")
-def jobs(days: int | None = 30) -> dict:
-    """Scanned jobs posted in the last `days` days (0 for all)."""
+def jobs(days: int | None = 10) -> dict:
+    """Scanned jobs posted in the last `days` days (never more than 10)."""
     return scan_run.board(days or None)
 
 
@@ -303,11 +299,6 @@ def jobs_progress() -> dict:
 @app.post("/jobs/scan")
 def jobs_scan(request: ScanRequest) -> dict:
     return {"started": scan_run.start_scan(request.only), "progress": scan_run.progress()}
-
-
-@app.post("/jobs/score")
-def jobs_score(request: ScoreRequest) -> dict:
-    return {"started": scan_run.start_scoring(request.ids[:100]), "progress": scan_run.progress()}
 
 
 @app.get("/jobs/settings")
@@ -401,7 +392,7 @@ def queue_link(request: LinkRequest, origin: str | None = Header(default=None)) 
 
 @app.post("/queue/best")
 def queue_best(request: BestRequest) -> dict:
-    """Adds the best AI matches the queue can send by itself."""
+    """Adds the best title matches the queue can send by itself."""
     return autoapply.best(max(1, min(request.limit, 100)))
 
 

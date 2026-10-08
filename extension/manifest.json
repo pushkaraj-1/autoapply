@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Job Autofill",
-  "version": "0.27.0",
+  "version": "0.29.0",
   "description": "Fills job applications from your profile using the local jobautomate server.",
   "permissions": [
     "activeTab",
@@ -42,7 +42,8 @@
         "https://careers.smartrecruiters.com/*",
         "https://www.smartr.me/*",
         "https://workforcenow.adp.com/*",
-        "https://myjobs.adp.com/*"
+        "https://myjobs.adp.com/*",
+        "https://apply.workable.com/*"
       ],
       "js": [
         "common.js",

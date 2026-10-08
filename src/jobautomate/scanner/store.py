@@ -173,16 +173,6 @@ def update_job(job_id_: str, **fields) -> None:
         db.execute(f"UPDATE jobs SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?", (*fields.values(), job_id_))
 
 
-def unscored(min_fit: int, limit: int, ids: list[str] | None = None) -> list[dict]:
-    with connect() as db:
-        if ids:
-            marks = ",".join("?" * len(ids))
-            rows = db.execute(f"SELECT * FROM jobs WHERE id IN ({marks})", ids).fetchall()
-        else:
-            rows = db.execute("SELECT * FROM jobs WHERE deep_fit IS NULL AND hidden = 0 AND fit >= ? ORDER BY fit DESC, first_seen DESC LIMIT ?", (min_fit, limit)).fetchall()
-    return [row_dict(r) for r in rows]
-
-
 def counts() -> dict:
     with connect() as db:
         total = db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]

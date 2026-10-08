@@ -14,7 +14,7 @@ from types import ModuleType
 
 import yaml
 
-from jobautomate import ashby, cover_letter, generic, greenhouse, lever, oracle, rippling, smartrecruiters, workday
+from jobautomate import ashby, cover_letter, generic, greenhouse, lever, llm, oracle, rippling, smartrecruiters, workday
 from jobautomate.answers import Answer, pick, resolve_later, settle, us_option
 from jobautomate.greenhouse import Field
 from jobautomate.profile import ROOT, load_profile
@@ -80,6 +80,18 @@ def start_letter(fields: list[Field], company: str, title: str, location: str, d
         if answer.value == "cover_letter":
             return _letters.submit(letter_for, company, title, location, description_html, run_dir)
     return None
+
+
+def letter_result(letter: Future | None) -> tuple[str | None, Path | None, list[str]]:
+    """(text, pdf, warnings) of a cover letter being written; with the AI unavailable
+    there is no letter, and a warning says why."""
+    if not letter:
+        return None, None, []
+    try:
+        text, pdf = letter.result()
+        return text, pdf, []
+    except llm.AIUnavailable as error:
+        return None, None, [f"No cover letter was written: {error}"]
 
 
 def letter_for(company: str, title: str, location: str, description_html: str, run_dir: Path) -> tuple[str, Path]:
@@ -190,8 +202,8 @@ def prepare(url: str) -> Prepared:
     settle(fields)
     save_drafts(run_dir, fields)
     (run_dir / "plan.json").write_text(json.dumps(greenhouse.plan_as_dicts(fields), indent=2, default=str))
-    letter_text, letter_pdf = letter.result() if letter else (None, None)
-    return Prepared(company, title, location, run_dir, fields, letter_text, letter_pdf, warnings_for(description_html) + form_warnings(fields))
+    letter_text, letter_pdf, letter_warning = letter_result(letter)
+    return Prepared(company, title, location, run_dir, fields, letter_text, letter_pdf, warnings_for(description_html) + form_warnings(fields) + letter_warning)
 
 
 FIELD_TYPES = {"multiselect": "multi_value_multi_select", "checkboxes": "MultiValueSelect", "file": "File", "textarea": "LongText", "number": "Number"}
@@ -227,8 +239,8 @@ def answer_fields(url: str, page_fields: list[dict], page_job: dict | None = Non
     letter = start_letter(fields, company, title, location, description_html, run_dir)
     settle(fields)
     save_drafts(run_dir, fields)
-    letter_text, letter_pdf = letter.result() if letter else (None, None)
-    return Prepared(company, title, location, run_dir, fields, letter_text, letter_pdf, warnings_for(description_html) + form_warnings(fields))
+    letter_text, letter_pdf, letter_warning = letter_result(letter)
+    return Prepared(company, title, location, run_dir, fields, letter_text, letter_pdf, warnings_for(description_html) + form_warnings(fields) + letter_warning)
 
 
 # Workday's repeating sections name their boxes "<section>-<n>--<field>", for

@@ -22,7 +22,7 @@ function pickChoice(box, type, wanted) {
 
 // "Start typing..." boxes (location, and single choices with long lists): type the
 // way a keyboard does, wait for the suggestions, and click the one find() picks.
-async function ashbyCombobox(box, text, find, what) {
+async function ashbyCombobox(box, text, find, what, ms = 8000) {
   const input = box.querySelector("input[role=combobox]") || box.querySelector("input");
   const options = () => {
     const listbox = input.getAttribute("aria-controls") && document.getElementById(input.getAttribute("aria-controls"));
@@ -31,12 +31,12 @@ async function ashbyCombobox(box, text, find, what) {
   input.focus();
   input.select();
   if (!document.execCommand("insertText", false, text) || input.value !== text) setNativeValue(input, text);
-  let option = await waitFor(() => find(options()), 8000);
+  let option = await waitFor(() => find(options()), ms);
   if (!option) {
     // Some lists only open on a click or Down Arrow.
     realClick(input);
     input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown", code: "ArrowDown", keyCode: 40 }));
-    option = await waitFor(() => find(options()), 3000);
+    option = await waitFor(() => find(options()), Math.min(ms, 3000));
   }
   if (!option) {
     const seen = options().slice(0, 6).map((o) => clean(o.innerText));
@@ -51,15 +51,25 @@ async function chooseAshbyLocation(box, place) {
   const state = (rest[rest.length - 1] || "").toLowerCase();
   const states = { ca: "california", ny: "new york", wa: "washington", tx: "texas", ma: "massachusetts" };
   const text = (o) => clean(o.innerText).toLowerCase();
-  await ashbyCombobox(
-    box,
-    city,
-    (options) =>
-      options.find((o) => text(o).startsWith(city.toLowerCase()) && (text(o).includes(`, ${state}`) || (states[state] && text(o).includes(states[state])))) ||
-      options.find((o) => text(o).startsWith(city.toLowerCase())) ||
-      null,
-    `"${place}" in the suggestions`,
-  );
+  try {
+    await ashbyCombobox(
+      box,
+      city,
+      (options) =>
+        options.find((o) => text(o).startsWith(city.toLowerCase()) && (text(o).includes(`, ${state}`) || (states[state] && text(o).includes(states[state])))) ||
+        options.find((o) => text(o).startsWith(city.toLowerCase())) ||
+        null,
+      `"${place}" in the suggestions`,
+    );
+  } catch (error) {
+    // No such city in the list: the country instead.
+    let option = null;
+    await countryInstead(async (typed, match, ms) => {
+      await ashbyCombobox(box, typed, (options) => (option = match(options)), typed, ms).catch(() => {});
+      return option;
+    });
+    if (!option) throw error;
+  }
 }
 
 // "2026-12-15" or "2026-12" as the date box's MM/DD/YYYY.

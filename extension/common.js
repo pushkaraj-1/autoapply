@@ -30,6 +30,20 @@ async function waitFor(check, timeout = 4000) {
   return null;
 }
 
+// Location search boxes that don't suggest your city usually take the country, so
+// these are typed in turn. search(typed, match, ms) types into the box and waits up to
+// ms for an option match() accepts.
+const COUNTRY_SEARCHES = ["United States", "USA", "US"];
+const COUNTRY_OPTION = /^\W*(the )?(united states( of america)?|usa|u\.s\.(a\.)?|us)\b(?!\W*(virgin|minor))/i;
+
+async function countryInstead(search) {
+  for (const name of COUNTRY_SEARCHES) {
+    const option = await search(name, (options) => options.find((o) => COUNTRY_OPTION.test(clean(o.innerText))) || null, 4000);
+    if (option) return option;
+  }
+  return null;
+}
+
 function setNativeValue(element, value) {
   const proto = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(proto, "value").set.call(element, value);

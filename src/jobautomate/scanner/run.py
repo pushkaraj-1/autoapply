@@ -1,7 +1,8 @@
-"""Runs a scan (port of scan-sources.mjs) and the AI fit check (port of deep-score.mjs)
-in a background thread, keeping a progress record the Find jobs page polls."""
+"""Runs a scan (port of scan-sources.mjs) in a background thread, keeping a progress
+record the Find jobs page polls."""
 
 import json
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,14 +13,15 @@ from ruamel.yaml import YAML
 
 from jobautomate import tracker
 from jobautomate.profile import ROOT
-from jobautomate.scanner import careers, deep, jd, store
+from jobautomate.scanner import careers, store
 from jobautomate.scanner.filters import company_role_key, fit_scorer, location_filter, title_filter, within_days
 from jobautomate.scanner.sources import FETCHERS, NoCredentials, describe
 
 CONFIG_PATH = ROOT / "profile" / "scanner.yaml"
 STATE_PATH = ROOT / "data" / "scan_state.json"
 SOURCE_WORKERS = 6  # sources are different websites, so they can run side by side
-SCORE_WORKERS = 10  # the AI check waits on the network, so more at once is faster
+# The Find jobs page shows jobs posted in the last MAX_DAYS days, no older.
+MAX_DAYS = 10
 
 _yaml = YAML()
 _yaml.preserve_quotes = True
@@ -45,8 +47,6 @@ def save_config(changes: dict) -> dict:
     for name, on in changes.get("sources", {}).items():
         if name in config["sources"]:
             config["sources"][name]["enabled"] = bool(on)
-    for key, value in changes.get("deep_score", {}).items():
-        config["deep_score"][key] = value
     write_config(config)
     return settings()
 
@@ -64,7 +64,6 @@ def settings() -> dict:
         "auto_scan_hours": config.get("auto_scan_hours", 0),
         "title_filter": {k: list(config["title_filter"].get(k) or []) for k in ("positive", "negative")},
         "sources": {name: bool(cfg.get("enabled")) for name, cfg in config["sources"].items()},
-        "deep_score": dict(config.get("deep_score") or {}),
     }
 
 
@@ -109,18 +108,8 @@ def start_scan(only: list[str] | None = None) -> bool:
         if _progress.get("running"):
             return False
         _progress.clear()
-        _progress.update(running=True, phase="scan", started_at=datetime.now().isoformat(timespec="seconds"), sources=[], notices=[], added=0, stale=0, scored=0, to_score=0, new_ids=[])
+        _progress.update(running=True, phase="scan", started_at=datetime.now().isoformat(timespec="seconds"), sources=[], notices=[], added=0, stale=0, new_ids=[])
     threading.Thread(target=_scan, args=(only,), daemon=True).start()
-    return True
-
-
-def start_scoring(ids: list[str]) -> bool:
-    with _lock:
-        if _progress.get("running"):
-            return False
-        _progress.clear()
-        _progress.update(running=True, phase="score", started_at=datetime.now().isoformat(timespec="seconds"), sources=[], notices=[], added=0, stale=0, scored=0, to_score=0, new_ids=[])
-    threading.Thread(target=_score, args=(store.unscored(0, len(ids), ids),), daemon=True).start()
     return True
 
 
@@ -196,39 +185,9 @@ def _scan(only: list[str] | None) -> None:
                 with _lock:
                     _progress.setdefault("notices", []).append(f"Finding company forms: {describe(error)}")
         set_progress(new_ids=[store.job_id(o["url"]) for o in new_offers])
-        settings_ = config.get("deep_score") or {}
-        if settings_.get("enabled", True) and new_offers:
-            min_fit = settings_.get("min_fit", 70)
-            shortlist = sorted((o for o in new_offers if o["fit"] >= min_fit), key=lambda o: -o["fit"])[: settings_.get("limit", 60)]
-            _score(store.unscored(0, len(shortlist), [store.job_id(o["url"]) for o in shortlist]) if shortlist else [])
-        else:
-            set_progress(running=False, phase="done", finished_at=datetime.now().isoformat(timespec="seconds"))
+        set_progress(running=False, phase="done", finished_at=datetime.now().isoformat(timespec="seconds"))
     except Exception as error:
         set_progress(running=False, phase="done", error=describe(error), finished_at=datetime.now().isoformat(timespec="seconds"))
-
-
-def score_one(job: dict) -> None:
-    """The AI fit check for one job, saved with the job."""
-    text, via = (job["description"], "scan") if len(job.get("description") or "") >= 200 else jd.fetch_jd(job["url"])
-    result = deep.score(job, text, via)
-    store.update_job(job["id"], deep_fit=result["fit"], verdict=result["verdict"], recommend=int(result["recommend"]), reasons=result["reasons"], gaps=result["gaps"], red_flags=result["red_flags"], jd_via=result["jd_via"], scored_at=result["scored_at"], description=text if len(text) >= 200 else job.get("description"))
-
-
-def _score(jobs: list[dict]) -> None:
-    set_progress(phase="score", to_score=len(jobs), scored=0)
-    done = 0
-    try:
-        with ThreadPoolExecutor(SCORE_WORKERS) as pool:
-            for future in as_completed([pool.submit(score_one, job) for job in jobs]):
-                try:
-                    future.result()
-                except Exception as error:
-                    with _lock:
-                        _progress.setdefault("notices", []).append(f"AI check: {describe(error)}")
-                done += 1
-                set_progress(scored=done)
-    finally:
-        set_progress(running=False, phase="done", finished_at=datetime.now().isoformat(timespec="seconds"))
 
 
 def auto_scan_loop() -> None:
@@ -260,6 +219,8 @@ def apply_url(url: str) -> str:
         return parsed._replace(path=path + "/application", query="", fragment="").geturl()
     if host == "ats.rippling.com" and "/jobs/" in path and not path.endswith("/apply"):
         return parsed._replace(path=path + "/apply", fragment="").geturl()
+    if host == "apply.workable.com" and re.fullmatch(r"/[^/]+/j/[^/]+", path):
+        return parsed._replace(path=path + "/apply/", fragment="").geturl()  # the form itself
     if host.endswith(".icims.com") and path.startswith("/jobs/") and path.endswith("/job") and "mode=apply" not in parsed.query:
         return parsed._replace(query="mode=apply&apply=yes", fragment="").geturl()  # its email step
     if host.endswith(".myworkdayjobs.com") and "/job/" in path and "/apply" not in path:
@@ -269,7 +230,8 @@ def apply_url(url: str) -> str:
 
 def board(days: int | None) -> dict:
     """Jobs for the Find jobs page, with applied state taken from the tracker."""
-    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d") if days else None
+    days = min(days or MAX_DAYS, MAX_DAYS)
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     jobs = store.list_jobs(since)
     applied = applied_check()
     queued = store.queue_statuses()

@@ -5,7 +5,7 @@
 // description are read from the page too. iCIMS shows its form inside an iframe
 // (?in_iframe=1), where this script also runs.
 
-const GN_HOSTS = /(^|\.)jobs\.gusto\.com$|(^|\.)wellfound\.com$|\.icims\.com$|\.oraclecloud\.com$|\.successfactors\.(com|eu)$|\.sapsf\.(com|eu|cn)$|\.ns2cloud\.com$|^(workforcenow|myjobs)\.adp\.com$/;
+const GN_HOSTS = /(^|\.)jobs\.gusto\.com$|(^|\.)wellfound\.com$|\.icims\.com$|\.oraclecloud\.com$|\.successfactors\.(com|eu)$|\.sapsf\.(com|eu|cn)$|\.ns2cloud\.com$|^(workforcenow|myjobs)\.adp\.com$|^apply\.workable\.com$/;
 const GN_ICIMS = /\.icims\.com$/.test(location.hostname);
 // Oracle fills in answers saved from earlier applications to the same company, and
 // from unfinished ones. Its questions are answered again, so an old answer is never sent.
@@ -387,11 +387,14 @@ async function gnAutocomplete(element, value) {
   realClick(element.closest("[class*=control]") || element);
   element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown", keyCode: 40 }));
   let option = await waitFor(find, 1500);
-  if (!option) {
-    setNativeValue(element, String(value).split(",")[0]);
+  const search = async (typed, match, ms = 8000) => {
+    setNativeValue(element, typed);
     for (const type of ["keydown", "keyup"]) element.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key: "a", keyCode: 65 }));
-    option = await waitFor(find, 8000);
-  }
+    return waitFor(() => match([...document.querySelectorAll("[role=option], [id*='-option-']")].filter((o) => o.offsetParent)), ms);
+  };
+  if (!option) option = await search(String(value).split(",")[0], () => find());
+  // A place ("Los Angeles, CA") the list doesn't have: the country instead.
+  if (!option && /^[^,\d]+,\s*[^,\d]+/.test(String(value))) option = await countryInstead(search);
   if (!option) throw new Error(`no suggestion matched "${value}"`);
   realClick(option);
   await sleep(120);

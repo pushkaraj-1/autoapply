@@ -23,6 +23,9 @@ class Answer:
     note: str = ""
 
 
+LOCATION_QUESTION = re.compile(r"\blocation\b|\bcity\b|where (are|do) you (currently )?(located|based|live|reside)|current(ly)? (located|based|residing)", re.I)
+
+
 def pick(options: list[str], *wanted: str) -> str | None:
     """Returns the first option that equals, starts with, or contains a wanted string."""
     lowered = [o.lower().strip() for o in options]
@@ -69,8 +72,23 @@ def us_options(options: list[str]) -> list[str]:
 
 def yes_no(options: list[str], yes: bool) -> str | None:
     if yes:
-        return pick(options, "yes", "i agree", "agree", "i accept", "accept", "true")
+        return pick(options, "yes", "i agree", "agree", "i accept", "accept", "true", "i acknowledge", "acknowledge", "i confirm", "confirm", "i certify", "certify", "i understand", "understood")
     return pick(options, "no", "i do not", "i don't", "disagree", "decline", "false")
+
+
+# Boxes that certify, attest, acknowledge or agree to the application's terms, privacy
+# policy or consent notices: you said to accept these without reading them
+# (agree_to_certifications). Marketing and job-alert sign-ups are not among them.
+CERTIFY = re.compile(
+    r"\bcertify\b|^(applicant |candidate )?certification( statement)?\W*$|certification:|\battest(ation)?\b|\backnowledg|arbitration"
+    r"|by (agreeing|checking|clicking|selecting|submitting|ticking)|^i (accept|agree|consent|acknowledge|confirm|understand|have read|hereby|declare)\b"
+    r"|\b(read|reviewed),? (and|&) (agree|understand|accept|acknowledge)|(agree|consent) to (the |its |this |all )?(above|following|terms|privacy|policy|polic|notice|statement|disclosure|declaration|processing|collection|use|storage|application|retention|sharing|background)"
+    r"|\bconsent\b|\bgdpr\b|data (protection|privacy|processing)|\bdisclaimer\b|\bdeclaration\b|\b(eeo|equal opportunity) (statement|policy)|authori[sz]e .{0,60}\b(verify|contact|release|background|check)"
+    r"|privacy (policy|notice|statement)|terms (of (use|service)|and conditions)|\btrue,? (and |, )?(correct|complete|accurate)",
+    re.I,
+)
+DEMOGRAPHIC = re.compile(r"disabilit|veteran|gender|\bsex\b|sexual|race|racial|ethnic|hispanic|latino|pronoun|transgender|lgbt", re.I)
+OPT_IN = re.compile(r"marketing|newsletter|promotion|text messages?|\bsms\b|whatsapp|future (job )?(opportunit|opening|role)|talent (community|network|pool)|job alerts?|(email|e-mail) updates", re.I)
 
 
 def us_option(options: list[str]) -> str | None:
@@ -157,8 +175,13 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
         return Answer((pick(options, contact["county"]) if options else None) or contact["county"], "profile")
     if re.fullmatch(r"address line 2|apartment.*|suite.*|county", q):
         return Answer(None, "skip", "optional")
-    if re.fullmatch(r"(set )?(your |current )?location( \(city\))?|city, state|current city|where are you (currently )?(located|based)\??", q) and not options:
-        return Answer(f"{contact['city']}, {contact['state']}", "profile")
+    if re.fullmatch(r"(set )?(your |current )?location( \(city\))?|city, state|current city|where are you (currently )?(located|based)\??", q):
+        if not options:
+            return Answer(f"{contact['city']}, {contact['state']}", "profile")
+        # A list without your city: the country is the next best answer.
+        found = pick(options, f"{contact['city']}, {contact['state']}", contact["city"]) or us_option(options)
+        if found:
+            return Answer(found, "profile")
     if q == "city":
         return Answer(contact["city"], "profile")
     if re.fullmatch(r"(county/)?state(/province| or province|/region)?|province", q):
@@ -310,7 +333,7 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
         if hourly:
             return Answer(str(salary["hourly_number"]) if numbers_only else salary["hourly_text"], "rule")
         return Answer(str(salary["number"]) if numbers_only else salary["text"], "rule")
-    if re.search(r"how did you (hear|find|learn|come across)|where did you (hear|find|see)|referr?al source|source of (this )?application", q):
+    if re.search(r"how did you (hear|find|learn|come across)|where did you (hear|find|see)|referr?al source|source of (this )?application", q) or q in ("source", "job source", "application source", "candidate source", "lead source"):
         sources = p["standing_answers"]["job_source"]
         if not options:
             return Answer(sources[0], "rule")
@@ -373,7 +396,12 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
         if consent is None:
             return Answer(None, "skip", "optional, left for you to choose")
         return Answer(pick(options, "yes") if consent else pick(options, "opt out", "no"), "rule")
-    if re.search(r"(current|most recent|latest) (company|employer)", q) and not re.search(r"non-?\s?compete", q):
+    # Non-competes, employment agreements and post-employment restrictions: No. Checked
+    # before the current-employer rule, since these questions name "your current employer".
+    if re.search(r"non-?\s?compete|non-?\s?solicit|restrictive covenant|post-?\s?employment (restriction|obligation|agreement|covenant)|(subject to|bound by|party to|signed) (any |an? )?(employment |restrictive )?(agreement|contract|restriction|obligation)s?", q):
+        return Answer(yes_no(options, p["standing_answers"]["non_compete"]) if options else "No", "rule")
+    # "Current employer" asks for a name, not a yes/no about it.
+    if re.search(r"(current|most recent|latest) (company|employer)", q) and not yes_no(options, True) and not re.search(r"agreement|restrict|obligat|contract|policy|polic|relationship|related|refer", q):
         return Answer(p["current_role"]["company"], "profile")
     if "current title" in q or "current job title" in q:
         return Answer(p["current_role"]["title"], "profile")
@@ -427,9 +455,11 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
             return Answer(choice(pick(options, completed, level, level + "s")), "rule")
         return Answer(completed, "rule")
 
-    if re.search(r"non-?\s?compete", q):
-        return Answer(yes_no(options, p["standing_answers"]["non_compete"]), "rule")
-    if re.search(r"\bcertify\b|arbitration|by agreeing|^i (accept|agree|consent|acknowledge)\b", q) and options:
+    # A sign-up is a short box ("Send me job alerts"); a long notice that only mentions
+    # marketing is still an agreement to accept.
+    # Only Yes / I agree style boxes, and never the voluntary disability, veteran or
+    # demographic questions, whose notices also talk about consent.
+    if CERTIFY.search(q) and not (OPT_IN.search(q) and len(q) < 200) and options and len(options) <= 3 and not DEMOGRAPHIC.search(q):
         return Answer(yes_no(options, p["standing_answers"]["agree_to_certifications"]), "rule")
 
     demo = p["demographics"]
@@ -484,7 +514,11 @@ def resolve(label: str, field_name: str, field_type: str, options: list[str], co
     # waste time selecting it").
     if not required:
         return Answer(None, "skip", "optional; left blank")
-    answer = ask_llm(label, options, company, context, essay=is_essay(label, field_type, options))
+    try:
+        answer = ask_llm(label, options, company, context, essay=is_essay(label, field_type, options))
+    except llm.AIUnavailable as error:
+        # The rule answers still go in; only the questions needing the AI wait for you.
+        return Answer(None, "ask", f"the AI is unavailable: {error}")
     # An optional question the facts don't settle is left blank rather than asked.
     if answer.source == "ask" and not required:
         return Answer(None, "skip", f"optional, left blank ({answer.note})")
@@ -688,6 +722,12 @@ def closest_option(label: str, wanted: str, options: list[str]) -> str | None:
     found = pick(options, wanted)
     if found:
         return found
+    # A US place ("Los Angeles, CA") for a location question whose list doesn't have it:
+    # the city in other wording, else the country ("United States", "USA", "US").
+    if LOCATION_QUESTION.search(label) and US_PLACE.search(wanted) and not NON_US_PLACE.search(wanted):
+        found = pick(options, wanted.split(",")[0].strip()) or us_option(options)
+        if found:
+            return found
     prompt = f"""A job application question has a list of options. The applicant's answer is not written exactly like any option.
 Pick the ONE option that means the same thing as the answer. If no option means the same thing, reply NONE. Never pick an option that changes the meaning (for example a different country, a different yes/no, a different number range).
 
@@ -696,7 +736,10 @@ Answer: {wanted}
 Options: {json.dumps(options)}
 
 Reply with JSON only: {{"option": "<an option copied exactly, or NONE>"}}"""
-    raw = llm.chat([{"role": "user", "content": prompt}], temperature=0, max_tokens=200)
+    try:
+        raw = llm.chat([{"role": "user", "content": prompt}], temperature=0, max_tokens=200)
+    except llm.AIUnavailable:
+        return None
     match = re.search(r"\{.*\}", raw, re.S)
     try:
         option = json.loads(match.group(0)).get("option") if match else None

@@ -31,18 +31,20 @@ function chooseNativeSelect(select, wanted) {
 async function chooseLeverLocation(place) {
   const input = named("location");
   const [city, state] = place.split(",").map((s) => s.trim().toLowerCase());
-  input.focus();
-  setNativeValue(input, place.split(",")[0]);
-  // The search runs on key events, not on input events.
-  for (const type of ["keydown", "keypress", "keyup"]) {
-    input.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key: "s", code: "KeyS", keyCode: 83, which: 83 }));
-  }
-  const option = await waitFor(() => {
-    const options = [...document.querySelectorAll(".dropdown-location")];
-    const text = (o) => clean(o.innerText).toLowerCase();
-    return options.find((o) => text(o).startsWith(city) && (text(o).includes(state) || /\busa?\b/.test(text(o)))) || null;
-  }, 10000);
-  if (!option) throw new Error("no matching city in the suggestions");
+  const search = async (typed, match, ms = 10000) => {
+    input.focus();
+    setNativeValue(input, typed);
+    // The search runs on key events, not on input events.
+    for (const type of ["keydown", "keypress", "keyup"]) {
+      input.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key: "s", code: "KeyS", keyCode: 83, which: 83 }));
+    }
+    return waitFor(() => match([...document.querySelectorAll(".dropdown-location")]), ms);
+  };
+  const text = (o) => clean(o.innerText).toLowerCase();
+  const option =
+    (await search(place.split(",")[0], (options) => options.find((o) => text(o).startsWith(city) && (text(o).includes(state) || /\busa?\b/.test(text(o)))) || null)) ||
+    (await countryInstead(search));
+  if (!option) throw new Error("no matching city or country in the suggestions");
   realClick(option);
   await sleep(120);
 }

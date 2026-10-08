@@ -27,15 +27,15 @@ async function chooseRipplingOption(combobox, wanted) {
 
 async function chooseRipplingLocation(input, place) {
   const [city, state] = place.split(",").map((s) => s.trim().toLowerCase());
-  input.focus();
-  setNativeValue(input, place.split(",")[0]);
-  for (const type of ["keydown", "keyup"]) input.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key: "s", keyCode: 83 }));
-  const option = await waitFor(() => {
-    const options = [...document.querySelectorAll("[role=option]")];
-    const text = (o) => clean(o.innerText).toLowerCase();
-    return options.find((o) => text(o).startsWith(city) && (text(o).includes(state) || text(o).includes(", ca"))) || null;
-  }, 10000);
-  if (!option) throw new Error("no matching city in the suggestions");
+  const search = async (typed, match, ms = 10000) => {
+    input.focus();
+    setNativeValue(input, typed);
+    for (const type of ["keydown", "keyup"]) input.dispatchEvent(new KeyboardEvent(type, { bubbles: true, key: "s", keyCode: 83 }));
+    return waitFor(() => match([...document.querySelectorAll("[role=option]")]), ms);
+  };
+  const text = (o) => clean(o.innerText).toLowerCase();
+  const option = (await search(place.split(",")[0], (options) => options.find((o) => text(o).startsWith(city) && (text(o).includes(state) || text(o).includes(", ca"))) || null)) || (await countryInstead(search));
+  if (!option) throw new Error("no matching city or country in the suggestions");
   realClick(option);
   await sleep(300);
 }

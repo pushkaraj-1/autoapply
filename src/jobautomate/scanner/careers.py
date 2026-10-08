@@ -159,7 +159,6 @@ def ai_same_job(company: str, listed: str, posted: str) -> bool:
             ],
             temperature=0,
             max_tokens=3,
-            model=os.environ.get("OPENROUTER_WRITING_MODEL") or None,  # the stronger model: a wrong yes queues the wrong job
         )
         same = reply.strip().lower().startswith("y")
     except Exception:
@@ -219,6 +218,8 @@ def site_of(url: str) -> tuple[str, str] | None:
         return "lever", path[0]
     if host == "jobs.ashbyhq.com" and path:
         return "ashby", path[0]
+    if host == "apply.workable.com" and path and path[0] not in ("api", "j"):
+        return "workable", path[0]
     if host.endswith(".icims.com"):
         return "icims", host
     if "ats=successfactors" in parsed.query or re.search(r"career\d*\.successfactors\.|\.sapsf\.", host):
@@ -357,6 +358,19 @@ def search_successfactors(host: str, title: str) -> list[dict]:
     return cached(f"sf:{host}:{norm(title)}", fetch)
 
 
+def search_workable(account: str, title: str) -> list[dict]:
+    def fetch():
+        response = httpx.post(f"https://apply.workable.com/api/v3/accounts/{account}/jobs", json={"query": title, "location": [], "department": [], "worktype": [], "remote": []}, headers=HEADERS, timeout=20)
+        response.raise_for_status()
+        out = []
+        for job in response.json().get("results", []):
+            place = job.get("location") or {}
+            out.append({"title": job.get("title", ""), "url": f"https://apply.workable.com/{account}/j/{job['shortcode']}/", "location": ", ".join(p for p in (place.get("city"), place.get("region"), place.get("country")) if p)})
+        return out
+
+    return cached(f"workable:{account}:{norm(title)}", fetch)
+
+
 def search(system: str, base: str, title: str) -> list[dict]:
     if system == "workday":
         return search_workday(base, title)
@@ -368,6 +382,8 @@ def search(system: str, base: str, title: str) -> list[dict]:
         return search_icims(base, title)
     if system == "successfactors":
         return search_successfactors(base, title)
+    if system == "workable":
+        return search_workable(base, title)
     return []
 
 

@@ -31,12 +31,13 @@ from jobautomate.profile import ROOT, load_profile
 from jobautomate.scanner import careers
 from jobautomate.scanner import run as scan_run
 from jobautomate.scanner import store
+from jobautomate.scanner.filters import title_filter
 
 SERVER = "http://127.0.0.1:8765"
 SHOTS = ROOT / "data" / "autoapply"
 # Sites the queue may submit on by itself (the user approved Workday and Rippling on
-# 2026-10-07, and Oracle Cloud and SuccessFactors on 2026-10-08).
-SITES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "workday": "Workday", "rippling": "Rippling", "oracle": "Oracle Cloud", "successfactors": "SuccessFactors", "icims": "iCIMS", "adp": "ADP"}
+# 2026-10-07, and Oracle Cloud, SuccessFactors and Workable on 2026-10-08).
+SITES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "workday": "Workday", "rippling": "Rippling", "oracle": "Oracle Cloud", "successfactors": "SuccessFactors", "icims": "iCIMS", "adp": "ADP", "workable": "Workable"}
 # Sites the queue takes but always hands to you: iCIMS shows an hCaptcha challenge
 # as soon as its email step is sent, and captchas are never solved.
 # ADP's first step is checked by an invisible reCAPTCHA, and from the queue's browser
@@ -47,7 +48,7 @@ HANDOFF_SITES = {
 }
 # web_lookups_per_day: web searches (Brave Search, or Google whose free 100 a day are
 # shared with the googlejobs scan source) a day for finding companies' careers sites.
-DEFAULTS = {"daily_cap": 15, "submit": True, "min_fit": 70, "sites": list(SITES), "gap_seconds": 45, "code_wait_minutes": 10, "web_lookups_per_day": 40}
+DEFAULTS = {"daily_cap": 15, "submit": True, "min_fit": 70, "sites": list(SITES), "gap_seconds": 45, "code_wait_minutes": 10, "web_lookups_per_day": 40, "job_minutes": 8}
 # Jobs prepared ahead of the one being filled: their answers and cover letters are
 # written while the queue works, so each fill starts with everything ready.
 WARM_AHEAD = 3
@@ -157,7 +158,7 @@ ERRORS = """
   .map(e => e.innerText.trim()))].slice(0, 5)
 """
 
-_state: dict = {"running": False, "stop": False, "skip": False, "submitting": False, "chrome": None, "current": None, "message": "", "code_request": None, "code": None}
+_state: dict = {"running": False, "stop": False, "skip": False, "timed_out": False, "submitting": False, "chrome": None, "current": None, "message": "", "code_request": None, "code": None}
 _lock = threading.Lock()
 
 
@@ -195,6 +196,7 @@ PAGE_SITES = {
     "successfactors": re.compile(r"[?&]ats=successfactors\b|//career\d*\.successfactors\.(com|eu)/|\.sapsf\.(com|eu|cn)/|//career[\w-]*\.ns2cloud\.com/", re.I),
     "icims": re.compile(r"\.icims\.com/|[?&]icims=1\b", re.I),
     "adp": re.compile(r"//(workforcenow|myjobs)\.adp\.com/", re.I),
+    "workable": re.compile(r"//apply\.workable\.com/[^/]+/j/", re.I),
 }
 
 
@@ -272,8 +274,14 @@ def match_forms(jobs: list[dict], google: int | None = None) -> int:
     return found
 
 
+# Internships are not applied to (user, 2026-10-08: "remove the intern jobs ... and dont add them from now on").
+INTERN = re.compile(r"\bintern(s|ship|ships)?\b", re.I)
+
+
 def why_not(job: dict, allowed: list[str], applied) -> str:
     """Why a job can't go in the queue, or "" if it can."""
+    if INTERN.search(job.get("title") or ""):
+        return "internships are left out (your setting)"
     site = site_key(scan_run.apply_url(job_link(job)))
     if applied(job):
         return "already applied"
@@ -334,16 +342,15 @@ def add_link(listing_url: str, apply_url: str, company: str, title: str, locatio
     return {"added": False, "site": name, "apply_url": real, "reason": f"{result['skipped'][0]['reason']}. It is saved on Find jobs, where Apply opens the company's form." if result["skipped"] else "It is saved on Find jobs."}
 
 
-# "Add best matches" scores at most this many not-yet-scored jobs per click, and looks
-# up the company's own form for at most this many jobs from LinkedIn and other job sites.
-SCORE_ON_ADD = 200
+# "Add best matches" looks up the company's own form for at most this many jobs from
+# LinkedIn and other job sites per click.
 MATCH_ON_ADD = 400
 
 
-def best(limit: int = 50, days: int = 14) -> dict:
-    """Queues the best AI matches from the last `days` days that the queue can send.
-    Jobs the AI has not looked at yet are scored first, the most promising (by title
-    match) first, so new jobs don't wait for a separate fit check."""
+def best(limit: int = 50, days: int = scan_run.MAX_DAYS) -> dict:
+    """Queues the best title matches from the last `days` days that the queue can send.
+    No AI fit check: jobs are ranked by the scanner's title fit, and jobs an earlier AI
+    check said to skip stay out."""
     s = settings()
     applied = scan_run.applied_check()
     in_queue = store.queue_statuses()
@@ -353,22 +360,14 @@ def best(limit: int = 50, days: int = 14) -> dict:
     # form is found; the best title matches are looked up first.
     unmatched = sorted((j for j in recent if needs_lookup(j)), key=lambda j: j.get("fit") or 0, reverse=True)
     matched_now = match_forms(unmatched[:MATCH_ON_ADD])
-    candidates = [job for job in recent if not why_not(job, s["sites"], applied)]
-    unscored = sorted((j for j in candidates if j.get("deep_fit") is None), key=lambda j: j.get("fit") or 0, reverse=True)[:SCORE_ON_ADD]
-    scored_now = 0
-    if unscored:
-        with ThreadPoolExecutor(scan_run.SCORE_WORKERS) as pool:
-            for future in as_completed([pool.submit(scan_run.score_one, store.get_job(j["id"])) for j in unscored]):
-                try:
-                    future.result()
-                    scored_now += 1
-                except Exception:
-                    pass  # left unscored; tried again next time
-        candidates = [store.get_job(j["id"]) for j in candidates]
-    picks = [j for j in candidates if j and j.get("recommend") and (j.get("deep_fit") or 0) >= s["min_fit"] and not why_not(j, s["sites"], applied)]
-    picks.sort(key=lambda j: (j.get("deep_fit") or 0, j.get("fit") or 0), reverse=True)
+    if matched_now:
+        recent = [store.get_job(j["id"]) for j in recent]
+    # Jobs found before a word was added to the scanner's title filter (Senior, Sr.) stay out too.
+    keep_title = title_filter(scan_run.load_config().get("title_filter"))
+    candidates = [job for job in recent if job and keep_title(job["title"]) and not why_not(job, s["sites"], applied)]
+    picks = [j for j in candidates if (j.get("fit") or 0) >= s["min_fit"] and not (j.get("deep_fit") is not None and not j.get("recommend"))]
+    picks.sort(key=lambda j: (j.get("fit") or 0, j.get("posted") or j.get("first_seen") or ""), reverse=True)
     result = add([j["id"] for j in picks[:limit]])
-    result["scored_now"] = scored_now
     result["matched_now"] = matched_now
     result["considered"] = len(candidates)
     return result
@@ -485,13 +484,38 @@ class Chrome:
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
-def interrupted(stopping: bool) -> dict:
-    """The outcome of a job you skipped, or that Stop ended."""
+# The AI's own outage messages (llm.UNAVAILABLE), as they appear in a job's reasons.
+AI_OUT = re.compile(r"OpenRouter (?:is out of credits\. Add credits at [^\s)]+|refused the key\. Check OPENROUTER_KEY in the \.env file\.)")
+
+
+def interrupted(stopping: bool, minutes: float = 0) -> dict:
+    """The outcome of a job you skipped, that Stop ended, or that ran out of time."""
     if _state["submitting"]:
         return {"status": "unconfirmed", "reasons": ["You ended it after Submit was pressed, so it may have been sent. Check your email before applying again."]}
     if stopping:
         return {"status": "queued", "reasons": []}  # back in line for the next run
+    if _state["timed_out"]:
+        return {"status": "needs_you", "reasons": [f"It was still filling after {minutes:g} minutes, so the queue moved on to the next job. {FINISH_YOURSELF}"]}
     return {"status": "needs_you", "reasons": [f"You skipped it while it was being filled. {FINISH_YOURSELF}"]}
+
+
+def watch_time(done: threading.Event, minutes: float) -> None:
+    """Skips the job being filled after `minutes`, as the Skip button does. Time spent
+    waiting for an emailed code doesn't count, and a job is never cut off once Submit
+    has been pressed."""
+    used = 0.0
+    while not done.wait(2):
+        with _lock:
+            if _state["code_request"] or _state["submitting"]:
+                continue
+            used += 2
+            if used < minutes * 60 or _state["skip"] or _state["stop"]:
+                continue
+            _state.update(skip=True, timed_out=True, message=f"Taking too long; skipping {(_state['current'] or {}).get('title', 'this job')}...")
+            chrome = _state["chrome"]
+        if chrome:
+            chrome.kill()
+        return
 
 
 def warm_ahead(current_id: str) -> None:
@@ -607,9 +631,12 @@ def _run() -> None:
                 set_entry(job["id"], "running")
                 warm_ahead(job["id"])
                 with _lock:
-                    _state.update(skip=False, submitting=False)
+                    _state.update(skip=False, timed_out=False, submitting=False)
                 say(f"Filling {job['title']} at {job['company']}...", {"id": job["id"], "title": job["title"], "company": job["company"]})
                 outcome = None
+                done = threading.Event()
+                if s["job_minutes"]:
+                    threading.Thread(target=watch_time, args=(done, float(s["job_minutes"])), daemon=True).start()
                 for attempt in range(2):
                     chrome = None
                     try:
@@ -633,8 +660,18 @@ def _run() -> None:
                             _state["chrome"] = None
                         if chrome:
                             chrome.close()
+                done.set()
                 if (_state["skip"] or _state["stop"]) and (outcome is None or outcome["status"] != "submitted"):
-                    outcome = interrupted(stopping=_state["stop"] and not _state["skip"])
+                    outcome = interrupted(stopping=_state["stop"] and not _state["skip"], minutes=float(s["job_minutes"]))
+                # With the AI out (no OpenRouter credits, or its key refused), every job
+                # would end up needing you, so the queue stops and the job keeps its place.
+                ai_out = next((r for r in outcome.get("reasons", []) if AI_OUT.search(r)), None)
+                if ai_out and outcome["status"] != "submitted":
+                    finish(job, {"status": "queued", "reasons": []})
+                    say(f"Stopped: {AI_OUT.search(ai_out).group(0)} Then press Start again.")
+                    with _lock:
+                        _state["stop"] = True
+                    break
                 finish(job, outcome)
                 say(f"Last one: {job['title']} at {job['company']}: {LABELS[outcome['status']]}.")
                 # A pause between sends, so applications don't go out in a burst.
@@ -642,7 +679,7 @@ def _run() -> None:
                 end = time.time() + pause
                 while time.time() < end and not _state["stop"]:
                     time.sleep(1)
-            if _state["stop"]:
+            if _state["stop"] and not _state["message"].startswith("Stopped:"):
                 say("Stopped.")
     except Exception as error:
         say(f"The queue stopped: {error}")

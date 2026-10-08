@@ -117,16 +117,17 @@ function srFields() {
 // Suggestions can be in a shadow root too, so they are looked for everywhere.
 async function srPickSuggestion(element, value) {
   const city = String(value).split(",")[0].trim();
-  element.focus();
-  if (!document.execCommand("insertText", false, city) || element.value !== city) setNativeValue(element, city);
-  const wanted = String(value).toLowerCase();
-  const find = () => {
-    const options = srDeepAll("[role=option]").filter(srShown);
-    const text = (o) => clean(o.innerText).toLowerCase();
-    return options.find((o) => text(o) === wanted) || options.find((o) => text(o).startsWith(city.toLowerCase()) && /california|, ca\b/.test(text(o))) || options.find((o) => text(o).startsWith(city.toLowerCase())) || null;
+  const search = async (typed, match, ms = 6000) => {
+    element.focus();
+    element.select();
+    if (!document.execCommand("insertText", false, typed) || element.value !== typed) setNativeValue(element, typed);
+    return waitFor(() => match(srDeepAll("[role=option]").filter(srShown)), ms);
   };
-  const option = await waitFor(find, 6000);
-  if (!option) throw new Error(`no suggestion matched "${value}"`);
+  const wanted = String(value).toLowerCase();
+  const text = (o) => clean(o.innerText).toLowerCase();
+  const find = (options) => options.find((o) => text(o) === wanted) || options.find((o) => text(o).startsWith(city.toLowerCase()) && /california|, ca\b/.test(text(o))) || options.find((o) => text(o).startsWith(city.toLowerCase())) || null;
+  const option = (await search(city, find)) || (await countryInstead(search));
+  if (!option) throw new Error(`no suggestion matched "${value}" or the country`);
   realClick(option);
   await sleep(300);
 }
